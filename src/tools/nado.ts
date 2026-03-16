@@ -194,8 +194,11 @@ async function signOrder(params: {
   const expiration = params.expiration;
   const nonce = getNonce();
   const priceX18 = toX18(params.price);
-  // amount in x18 (positive=long/buy, negative=short/sell)
   const amountX18 = toX18(params.amount);
+
+  // appendix v1: LSB = version byte (1), upper bits = recv_time deadline in seconds
+  const nowSec = Math.floor(Date.now() / 1000);
+  const appendix = (BigInt(nowSec + 60) << 8n) | 1n;
 
   const order = {
     sender: params.subaccount as `0x${string}`,
@@ -203,19 +206,17 @@ async function signOrder(params: {
     amount: amountX18.toString(),
     expiration: expiration.toString(),
     nonce: nonce.toString(),
+    appendix: appendix.toString(),
   };
 
-  // EIP-712 for order signing — verifyingContract is the product address for spot,
-  // or ENDPOINT for perp (Vertex convention: spot uses product-as-address, perp uses endpoint)
-  const verifyingContract = `0x${params.productId.toString(16).padStart(40, '0')}` as Address;
-
+  // EIP-712: verifyingContract is the ENDPOINT for all NADO orders
   const signature = await signTypedData({
     privateKey: params.privateKey as `0x${string}`,
     domain: {
       name: 'Vertex',
       version: '0.0.1',
       chainId: CHAIN_ID,
-      verifyingContract,
+      verifyingContract: ENDPOINT as Address,
     },
     types: {
       Order: [
@@ -224,6 +225,7 @@ async function signOrder(params: {
         { name: 'amount', type: 'int128' },
         { name: 'expiration', type: 'uint64' },
         { name: 'nonce', type: 'uint64' },
+        { name: 'appendix', type: 'uint128' },
       ],
     },
     primaryType: 'Order',
@@ -233,6 +235,7 @@ async function signOrder(params: {
       amount: amountX18,
       expiration: expiration,
       nonce: nonce,
+      appendix: appendix,
     },
   });
 
@@ -634,8 +637,7 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
       const result = await gatewayExecute({
         place_order: {
           product_id: productId,
-          // appendix v1 format: LSB = version byte (1), upper bits = recv_time deadline in seconds
-          order: { ...order, appendix: ((BigInt(Math.floor(Date.now() / 1000) + 60) << 8n) | 1n).toString() },
+          order,  // appendix included + signed inside signOrder
           signature,
         },
       });
