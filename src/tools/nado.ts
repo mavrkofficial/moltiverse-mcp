@@ -196,9 +196,8 @@ async function signOrder(params: {
   const priceX18 = toX18(params.price);
   const amountX18 = toX18(params.amount);
 
-  // appendix v1: LSB = version byte (1), upper bits = recv_time deadline in seconds
-  const nowSec = Math.floor(Date.now() / 1000);
-  const appendix = (BigInt(nowSec + 60) << 8n) | 1n;
+  // appendix v1: LSB = version byte (1), upper bits = recv_time deadline in milliseconds
+  const appendix = (BigInt(Date.now() + 60_000) << 8n) | 1n;
 
   const order = {
     sender: params.subaccount as `0x${string}`,
