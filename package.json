@@ -1,8 +1,8 @@
 {
   "name": "moltiverse-mcp",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "type": "module",
-  "description": "Unified MCP server for the Moltiverse Agent Economy on Ink \u2014 Tsunami V3 DEX, Sentry Agent Launch Factory, Tydro lending, NADO perps, Citadel LP Locker, Subgraph analytics, Relay cross-chain, and CEX trading via Kraken CLI",
+  "description": "Unified MCP server for the Moltiverse Agent Economy on Ink \u2014 Tsunami V3 DEX, Sentry Agent Launch Factory, Tydro lending, NADO perps, Citadel LP Locker, ZNS .ink domains, Subgraph analytics, Relay cross-chain, and CEX trading via Kraken CLI",
   "main": "dist/index.js",
   "bin": {
     "moltiverse-mcp": "dist/index.js"
@@ -37,7 +37,12 @@
     "relay",
     "kraken",
     "clob",
-    "concentrated-liquidity"
+    "concentrated-liquidity",
+    "zns",
+    "domains",
+    "ens",
+    "name-service",
+    "ink"
   ],
   "repository": {
     "type": "git",
@@ -47,7 +52,8 @@
   "author": "MAVRK",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "viem": "^2.28.0"
+    "viem": "^2.28.0",
+    "zns-sdk": "^0.0.6-1"
   },
   "devDependencies": {
     "typescript": "^5.8.0"
