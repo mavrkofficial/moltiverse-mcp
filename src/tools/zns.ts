@@ -3,7 +3,8 @@ import { type Address } from 'viem';
 import { getWalletClient, getAccount } from '../client.js';
 
 const require = createRequire(import.meta.url);
-const ZNSConnect = require('zns-sdk');
+const { ZNSConnect } = require('zns-sdk');
+const zns = ZNSConnect();
 
 const API = 'https://zns.bio/api';
 const TLD = 'ink';
@@ -94,8 +95,12 @@ export async function handleZnsTool(name: string, args: Record<string, unknown>)
   switch (name) {
     case 'zns_resolve_domain': {
       const domainName = normalizeDomain(args.domain as string);
-      const data = await apiGet('resolveDomain', { chain: CHAIN_ID, domain: domainName });
-      return { domain: `${domainName}.${TLD}`, address: data.address ?? null, found: !!data.address };
+      try {
+        const data = await apiGet('resolveDomain', { chain: CHAIN_ID, domain: domainName });
+        return { domain: `${domainName}.${TLD}`, address: data.address ?? null, found: !!data.address };
+      } catch {
+        return { domain: `${domainName}.${TLD}`, address: null, found: false };
+      }
     }
 
     case 'zns_resolve_address': {
@@ -110,20 +115,29 @@ export async function handleZnsTool(name: string, args: Record<string, unknown>)
 
     case 'zns_check_domain': {
       const domainName = normalizeDomain(args.domain as string);
-      const data = await apiGet('resolveDomain', { chain: CHAIN_ID, domain: domainName });
-      const available = !data.address;
-      return { domain: `${domainName}.${TLD}`, available, currentOwner: data.address ?? null };
+      // SDK's checkDomain returns true if taken, false if available
+      const taken = await zns.checkDomain(`${domainName}.${TLD}`);
+      if (taken) {
+        // Fetch owner address
+        try {
+          const data = await apiGet('resolveDomain', { chain: CHAIN_ID, domain: domainName });
+          return { domain: `${domainName}.${TLD}`, available: false, currentOwner: data.address ?? null };
+        } catch {
+          return { domain: `${domainName}.${TLD}`, available: false, currentOwner: null };
+        }
+      }
+      return { domain: `${domainName}.${TLD}`, available: true, currentOwner: null };
     }
 
     case 'zns_get_metadata': {
       const domainName = normalizeDomain(args.domain as string);
-      const metadata = await ZNSConnect.getMetadata(`${domainName}.${TLD}`);
+      const metadata = await zns.getMetadata(`${domainName}.${TLD}`);
       return { domain: `${domainName}.${TLD}`, metadata };
     }
 
     case 'zns_get_price': {
       const domains = (args.domains as string[]).map(normalizeDomain);
-      const price = await ZNSConnect.getPrice(domains, TLD);
+      const price = await zns.getPrice(domains, TLD);
       return { domains: domains.map(d => `${d}.${TLD}`), price };
     }
 
@@ -136,7 +150,7 @@ export async function handleZnsTool(name: string, args: Record<string, unknown>)
         : domains.map(() => defaultOwner);
 
       const walletClient = await getWalletClient();
-      const result = await ZNSConnect.register(walletClient, domains, owners, TLD);
+      const result = await zns.register(walletClient, domains, owners, TLD);
       return {
         domains: domains.map(d => `${d}.${TLD}`),
         owners,
