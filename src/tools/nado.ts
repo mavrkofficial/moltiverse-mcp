@@ -170,16 +170,16 @@ async function gatewayExecute(body: Record<string, unknown>): Promise<unknown> {
     headers: { 'Content-Type': 'application/json', 'Accept-Encoding': 'gzip, deflate, br', 'Accept': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`NADO gateway error ${res.status}: ${text.slice(0, 400)}`);
+  const json = await res.json() as Record<string, unknown>;
+  if (!res.ok || json?.status === 'failure') {
+    throw new Error(`NADO gateway error: ${json?.error ?? JSON.stringify(json).slice(0, 400)}`);
   }
-  return res.json();
+  return json;
 }
 
 // ── EIP-712 order signing ─────────────────────────────────────────────
 function getNonce(): bigint {
-  // Vertex-style nonce: current time in microseconds (ms * 1000) + random 3 digits
+  // Vertex-style nonce: current time in milliseconds + random 3 digits for uniqueness
   return BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000));
 }
 
@@ -634,7 +634,8 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
       const result = await gatewayExecute({
         place_order: {
           product_id: productId,
-          order: { ...order, appendix: '1' },  // appendix: version 1 required by NADO gateway v1.9.0+
+          // appendix v1 format: upper 64 bits = version (1), lower 64 bits = recv_time deadline in ms
+          order: { ...order, appendix: ((1n << 64n) | (BigInt(Date.now()) + 30000n)).toString() },
           signature,
         },
       });
