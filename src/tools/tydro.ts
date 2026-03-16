@@ -40,8 +40,9 @@ function formatUSD(val: bigint): string {
   return '$' + (Number(val) / 1e8).toFixed(2);
 }
 
-function parseAmount(amount: string, decimals: number): bigint {
-  const [whole, frac = ''] = amount.split('.');
+function parseAmount(amount: string | number, decimals: number): bigint {
+  const s = String(amount);
+  const [whole, frac = ''] = s.split('.');
   return BigInt(whole) * BigInt(10 ** decimals) + BigInt(frac.padEnd(decimals, '0').slice(0, decimals));
 }
 

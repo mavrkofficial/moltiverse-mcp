@@ -2,9 +2,10 @@
 // Archive API (read): https://archive.prod.nado.xyz/v1  — POST with typed query body
 // Gateway API (write): https://gateway.prod.nado.xyz/v1 — POST /execute with EIP-712 signed payloads
 
-import { type Address, encodePacked, keccak256, toHex, hexToBytes, encodeAbiParameters, parseAbiParameters } from 'viem';
+import { type Address, encodePacked, keccak256, toHex, hexToBytes, encodeAbiParameters, parseAbiParameters, maxUint256 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { signTypedData } from 'viem/accounts';
+import { publicClient, getWalletClient } from '../client.js';
 
 // ── Constants ────────────────────────────────────────────────────────
 const ARCHIVE  = 'https://archive.prod.nado.xyz/v1';
@@ -13,6 +14,54 @@ const CHAIN_ID = 57073;
 
 // Contract addresses on Ink mainnet
 const ENDPOINT = '0x05ec92D78ED421f3D3Ada77FFdE167106565974E';
+
+// Spot token addresses on Ink for NADO collateral deposits
+const SPOT_TOKENS: Record<number, { address: Address; decimals: number; symbol: string }> = {
+  0:  { address: '0x0200C29006150606B650577BBE7B6248F58470c1', decimals: 6,  symbol: 'USDT0'  },
+  1:  { address: '0x73e0c0d45e048d25fc26fa3159b0aa04bfa4db98', decimals: 8,  symbol: 'kBTC'   },
+  3:  { address: '0x4200000000000000000000000000000000000006', decimals: 18, symbol: 'WETH'   },
+  5:  { address: '0x2d270e6886d130d724215a266106e6832161eaed', decimals: 6,  symbol: 'USDC'   },
+  11: { address: '0xae4efbc7736f963982aacb17efa37fcbab924cb3', decimals: 18, symbol: 'SolvBTC'},
+};
+
+const ENDPOINT_ABI = [
+  {
+    name: 'depositCollateral',
+    type: 'function',
+    inputs: [
+      { name: 'subaccountName', type: 'bytes12' },
+      { name: 'productId', type: 'uint32' },
+      { name: 'amount', type: 'uint128' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    name: 'withdrawCollateral',
+    type: 'function',
+    inputs: [
+      { name: 'subaccountName', type: 'bytes12' },
+      { name: 'productId', type: 'uint32' },
+      { name: 'amount', type: 'uint128' },
+      { name: 'sendTo', type: 'address' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+] as const;
+
+const ERC20_APPROVE_ABI = [{
+  name: 'approve', type: 'function',
+  inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }],
+  outputs: [{ name: '', type: 'bool' }], stateMutability: 'nonpayable',
+}] as const;
+
+// Encode subaccount name as bytes12 (for depositCollateral / withdrawCollateral)
+function encodeSubaccountName(name: string): `0x${string}` {
+  const buf = Buffer.alloc(12);
+  Buffer.from(name, 'ascii').copy(buf, 0, 0, Math.min(12, name.length));
+  return `0x${buf.toString('hex')}` as `0x${string}`;
+}
 
 // Product ID registry (even = spot, odd perp pairs; perp IDs are even+1 per Vertex convention)
 const MARKETS: Record<string, { productId: number; type: 'spot' | 'perp' }> = {
@@ -305,6 +354,33 @@ export const nadoTools = [
         subaccountName: { type: 'string', description: 'Subaccount name (default: "default")' },
       },
       required: ['market', 'digest'],
+    },
+  },
+  {
+    name: 'nado_deposit',
+    description: 'Deposit collateral into your NADO subaccount to enable trading. Approves the token and calls depositCollateral on the NADO endpoint. Requires EVM_PRIVATE_KEY.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        token: { type: 'string', description: 'Token to deposit: USDT0, WETH, kBTC, USDC, SolvBTC, or token address' },
+        amount: { type: 'number', description: 'Amount to deposit in token units (e.g. 25 for $25 USDT0)' },
+        subaccountName: { type: 'string', description: 'Subaccount name (default: "default")' },
+      },
+      required: ['token', 'amount'],
+    },
+  },
+  {
+    name: 'nado_withdraw',
+    description: 'Withdraw collateral from your NADO subaccount back to your wallet. Requires EVM_PRIVATE_KEY.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        token: { type: 'string', description: 'Token to withdraw: USDT0, WETH, kBTC, USDC, SolvBTC, or token address' },
+        amount: { type: 'number', description: 'Amount to withdraw in token units' },
+        subaccountName: { type: 'string', description: 'Subaccount name (default: "default")' },
+        sendTo: { type: 'string', description: 'Recipient address (defaults to your wallet)' },
+      },
+      required: ['token', 'amount'],
     },
   },
   {
@@ -648,6 +724,85 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
         },
       });
       return { market: args.market, result };
+    }
+
+    case 'nado_deposit': {
+      const pk = process.env.EVM_PRIVATE_KEY;
+      if (!pk) throw new Error('EVM_PRIVATE_KEY required');
+      const account = privateKeyToAccount(pk as `0x${string}`);
+      const subName = (args.subaccountName as string) || 'default';
+      const tokenArg = args.token as string;
+      const amount = args.amount as number;
+
+      // Resolve token
+      const tokenUpper = tokenArg.toUpperCase();
+      const tokenInfo = Object.values(SPOT_TOKENS).find(t => t.symbol === tokenUpper)
+        ?? (tokenArg.startsWith('0x') ? { address: tokenArg as Address, decimals: 18, symbol: tokenArg } : null);
+      if (!tokenInfo) throw new Error(`Unknown token: ${tokenArg}. Supported: ${Object.values(SPOT_TOKENS).map(t => t.symbol).join(', ')}`);
+
+      const productId = Object.entries(SPOT_TOKENS).find(([, v]) => v.symbol === tokenUpper)?.[0]
+        ?? Object.entries(SPOT_TOKENS).find(([, v]) => v.address.toLowerCase() === tokenArg.toLowerCase())?.[0];
+      if (productId === undefined) throw new Error(`Cannot resolve productId for ${tokenArg}`);
+
+      const amountRaw = BigInt(Math.round(amount * 10 ** tokenInfo.decimals));
+      const subaccountNameBytes12 = encodeSubaccountName(subName);
+      const wc = await getWalletClient();
+
+      // Approve
+      const allowance = await publicClient.readContract({
+        address: tokenInfo.address, abi: ERC20_APPROVE_ABI,
+        functionName: 'approve', args: [ENDPOINT as Address, maxUint256],
+      }).catch(() => 0n);
+      const approveHash = await wc.writeContract({
+        address: tokenInfo.address, abi: ERC20_APPROVE_ABI,
+        functionName: 'approve', args: [ENDPOINT as Address, maxUint256],
+        account,
+      });
+      await publicClient.waitForTransactionReceipt({ hash: approveHash });
+
+      // Deposit
+      const depositHash = await wc.writeContract({
+        address: ENDPOINT as Address, abi: ENDPOINT_ABI,
+        functionName: 'depositCollateral',
+        args: [subaccountNameBytes12, parseInt(productId), amountRaw],
+        account,
+      });
+      await publicClient.waitForTransactionReceipt({ hash: depositHash });
+
+      return { token: tokenInfo.symbol, amount, subaccount: subName, txHash: depositHash };
+    }
+
+    case 'nado_withdraw': {
+      const pk = process.env.EVM_PRIVATE_KEY;
+      if (!pk) throw new Error('EVM_PRIVATE_KEY required');
+      const account = privateKeyToAccount(pk as `0x${string}`);
+      const subName = (args.subaccountName as string) || 'default';
+      const tokenArg = args.token as string;
+      const amount = args.amount as number;
+      const sendTo = (args.sendTo as string) ?? account.address;
+
+      const tokenUpper = tokenArg.toUpperCase();
+      const tokenInfo = Object.values(SPOT_TOKENS).find(t => t.symbol === tokenUpper)
+        ?? (tokenArg.startsWith('0x') ? { address: tokenArg as Address, decimals: 18, symbol: tokenArg } : null);
+      if (!tokenInfo) throw new Error(`Unknown token: ${tokenArg}. Supported: ${Object.values(SPOT_TOKENS).map(t => t.symbol).join(', ')}`);
+
+      const productId = Object.entries(SPOT_TOKENS).find(([, v]) => v.symbol === tokenUpper)?.[0]
+        ?? Object.entries(SPOT_TOKENS).find(([, v]) => v.address.toLowerCase() === tokenArg.toLowerCase())?.[0];
+      if (productId === undefined) throw new Error(`Cannot resolve productId for ${tokenArg}`);
+
+      const amountRaw = BigInt(Math.round(amount * 10 ** tokenInfo.decimals));
+      const subaccountNameBytes12 = encodeSubaccountName(subName);
+      const wc = await getWalletClient();
+
+      const hash = await wc.writeContract({
+        address: ENDPOINT as Address, abi: ENDPOINT_ABI,
+        functionName: 'withdrawCollateral',
+        args: [subaccountNameBytes12, parseInt(productId), amountRaw, sendTo as Address],
+        account,
+      });
+      await publicClient.waitForTransactionReceipt({ hash });
+
+      return { token: tokenInfo.symbol, amount, subaccount: subName, sendTo, txHash: hash };
     }
 
     default:
