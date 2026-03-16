@@ -634,7 +634,7 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
       const result = await gatewayExecute({
         place_order: {
           product_id: productId,
-          order: { ...order, appendix: '0' },  // appendix: u128 zero — required by NADO gateway, not part of EIP-712 sig
+          order: { ...order, appendix: '1' },  // appendix: version 1 required by NADO gateway v1.9.0+
           signature,
         },
       });
