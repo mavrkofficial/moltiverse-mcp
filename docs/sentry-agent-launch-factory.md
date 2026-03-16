@@ -84,14 +84,30 @@ The factory records every launch:
 
 ## Fee Collection
 
-All trading fees from Sentry-launched pools accrue to the factory-held LP positions. **Only the factory owner can collect fees**, and they are sent directly to the treasury address — individual users and token creators do not collect fees.
+All trading fees from Sentry-launched pools accrue to the factory-held LP positions. **Only the factory owner can collect fees.**
+
+When fees are collected, the factory automatically routes them:
+
+- **WETH fees** → swapped to **MOLTING** token via Tsunami V3 (`exactInputSingle`, 1% fee tier) — creating buy pressure on MOLTING with every fee harvest
+- **Meme token fees** → sent directly to the treasury
+
+If the MOLTING swap fails (e.g. insufficient liquidity), the WETH falls back to treasury. This ensures fee collection never reverts.
 
 ```
-collectFees(tokenId)              — collect fees from one LP position → treasury
-collectMultipleFees(tokenIds[])   — batch collect from multiple positions → treasury
+collectFees(tokenId)              — collect fees from one LP position, auto-buy MOLTING with WETH side
+collectMultipleFees(tokenIds[])   — batch collect from multiple positions
 ```
 
 The treasury address is updatable by the factory owner via `updateTreasury(newTreasury)`.
+
+### Fee Routing Constants (V3)
+
+| Constant | Value |
+|---|---|
+| `WETH9` | `0x4200000000000000000000000000000000000006` |
+| `MOLTING` | `0x63d49DF9B08da5dAA254c66BDacA0A481Ec5d89f` |
+| `SWAP_ROUTER` | `0x4415F2360bfD9B1bF55500Cb28fA41dF95CB2d2b` |
+| `MOLTING_POOL_FEE` | `10000` (1%) |
 
 ---
 
@@ -134,7 +150,8 @@ getSupportedBaseTokens()                — list all registered base tokens
 | `PoolInitialized(pool, token)` | Tsunami V3 pool created |
 | `LiquidityMinted(tokenId, pool, token)` | LP position minted |
 | `LPLocked(tokenId, pool, token)` | LP NFT permanently held by factory |
-| `FeesCollected(tokenId, amount0, amount1)` | Trading fees harvested to treasury |
+| `FeesCollected(tokenId, amount0, amount1)` | Trading fees harvested |
+| `MoltingBought(tokenId, wethIn, moltingOut)` | WETH fees swapped to MOLTING (V3) |
 | `BaseTokenAdded(baseToken, manager)` | New base token registered |
 | `BaseTokenRemoved(baseToken)` | Base token unregistered |
 | `PoolManagerUpdated(baseToken, oldManager, newManager)` | Pool manager changed |
@@ -162,7 +179,7 @@ getSupportedBaseTokens()                — list all registered base tokens
 | Contract | Address |
 |---|---|
 | **SentryAgentLaunchFactory (Proxy)** | `0x733733E8eAbB94832847AbF0E0EeD6031c3EB2E4` |
-| **Implementation** | `0xe7F676fE1C70BB540031c43dc12C552996ed4147` |
+| **Implementation (V3)** | `0x4b48bEAbAdb7e414A225Aeed7ACB8a9209B4800f` |
 | **ProxyAdmin** | `0x52D15931D109DcfAbe8C21b0E279dC6b3Dea7002` |
 
 Deployed on Ink (Chain ID 57073).

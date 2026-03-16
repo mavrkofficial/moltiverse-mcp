@@ -5,7 +5,7 @@ export const SentryAgentLaunchFactoryABI = [
     inputs: [{ name: "_name", type: "string" }, { name: "_symbol", type: "string" }, { name: "baseToken", type: "address" }],
     outputs: [{ name: "tokenAddress", type: "address" }, { name: "tokenId", type: "uint256" }],
   },
-  // ── Fee Collection (owner only → treasury) ──
+  // ── Fee Collection (owner only; WETH fees → MOLTING buy, meme fees → treasury) ──
   {
     type: "function", name: "collectFees", stateMutability: "nonpayable",
     inputs: [{ name: "tokenId", type: "uint256" }], outputs: [],
@@ -122,6 +122,14 @@ export const SentryAgentLaunchFactoryABI = [
     inputs: [
       { name: "oldTreasury", type: "address", indexed: false },
       { name: "newTreasury", type: "address", indexed: false },
+    ],
+  },
+  {
+    type: "event", name: "MoltingBought", anonymous: false,
+    inputs: [
+      { name: "tokenId", type: "uint256", indexed: true },
+      { name: "wethIn", type: "uint256", indexed: false },
+      { name: "moltingOut", type: "uint256", indexed: false },
     ],
   },
 ] as const;

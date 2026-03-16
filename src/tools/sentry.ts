@@ -52,7 +52,7 @@ export const sentryTools = [
   },
   {
     name: 'sentry_collect_fees',
-    description: 'Collect trading fees from factory-held LP positions. Owner only.',
+    description: 'Collect trading fees from factory-held LP positions. Owner only. WETH fees are auto-swapped to MOLTING; meme token fees go to treasury.',
     inputSchema: {
       type: 'object' as const,
       properties: {
