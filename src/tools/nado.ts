@@ -179,8 +179,8 @@ async function gatewayExecute(body: Record<string, unknown>): Promise<unknown> {
 
 // ── EIP-712 order signing ─────────────────────────────────────────────
 function getNonce(): bigint {
-  // Vertex-style nonce: current time in milliseconds * 10^6 + random 6 digits
-  return BigInt(Date.now()) * 1000000n + BigInt(Math.floor(Math.random() * 1000000));
+  // Vertex-style nonce: current time in microseconds (ms * 1000) + random 3 digits
+  return BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000));
 }
 
 async function signOrder(params: {
@@ -609,9 +609,9 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
       const nowSec = Math.floor(Date.now() / 1000);
       let expirationBits: bigint;
       if (tif === 'IOC') {
-        expirationBits = (1n << 62n) | BigInt(nowSec + 5);
+        expirationBits = (1n << 62n) | BigInt(nowSec + 60);
       } else if (tif === 'FOK') {
-        expirationBits = (2n << 62n) | BigInt(nowSec + 5);
+        expirationBits = (2n << 62n) | BigInt(nowSec + 60);
       } else {
         // GTC: 1 year from now
         expirationBits = BigInt(nowSec + 365 * 86400);
