@@ -178,26 +178,48 @@ async function gatewayExecute(body: Record<string, unknown>): Promise<unknown> {
 }
 
 // ── EIP-712 order signing ─────────────────────────────────────────────
-function getNonce(): bigint {
-  // Vertex-style nonce: current time in milliseconds + random 3 digits for uniqueness
-  return BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000));
+// NADO nonce encodes recv_time: (recvTimeMillis << 20) + randomInt
+// recv_time = deadline by which the sequencer must receive the order (default: now + 90s)
+function getOrderNonce(recvTimeMillis: number = Date.now() + 90_000): bigint {
+  const randomInt = Math.floor(Math.random() * 1000);
+  return (BigInt(recvTimeMillis) << 20n) + BigInt(randomInt);
+}
+
+// NADO order verifyingContract = address(uint160(productId))
+function getOrderVerifyingAddress(productId: number): Address {
+  return toHex(productId, { size: 20 }) as Address;
+}
+
+// Pack appendix bitfield (uint128):
+// | value(64) | builderId(16) | builderFeeRate(10) | reserved(24) | trigger(2) | reduceOnly(1) | orderType(2) | isolated(1) | version(8) |
+// orderType: 0=default/GTC, 1=IOC, 2=FOK, 3=post_only
+function packOrderAppendix(orderType: number): bigint {
+  let packed = 0n;                             // value (64 bits)
+  packed = (packed << 16n) | 0n;               // builderId
+  packed = (packed << 10n) | 0n;               // builderFeeRate
+  packed = (packed << 24n) | 0n;               // reserved
+  packed = (packed << 2n)  | 0n;               // trigger
+  packed = (packed << 1n)  | 0n;               // reduceOnly
+  packed = (packed << 2n)  | BigInt(orderType); // orderType
+  packed = (packed << 1n)  | 0n;               // isolated
+  packed = (packed << 8n)  | 1n;               // version = 1
+  return packed;
 }
 
 async function signOrder(params: {
   productId: number;
   price: number;
   amount: number;          // positive = buy, negative = sell
-  expiration: bigint;      // already-encoded expiration bits (TIF flags in upper 2 bits)
+  expiration: bigint;      // plain timestamp in seconds (no TIF flags — TIF is in appendix)
+  orderType: number;       // 0=GTC, 1=IOC, 2=FOK
   subaccount: string;      // 32-byte hex subaccount
   privateKey: string;
 }): Promise<{ order: Record<string, string>; signature: string }> {
   const expiration = params.expiration;
-  const nonce = getNonce();
+  const nonce = getOrderNonce();
   const priceX18 = toX18(params.price);
   const amountX18 = toX18(params.amount);
-
-  // appendix v1: LSB = version byte (1), upper bits = recv_time deadline in ms (5 min window)
-  const appendix = (BigInt(Date.now() + 300_000) << 8n) | 1n;
+  const appendix = packOrderAppendix(params.orderType);
 
   const order = {
     sender: params.subaccount as `0x${string}`,
@@ -208,14 +230,14 @@ async function signOrder(params: {
     appendix: appendix.toString(),
   };
 
-  // EIP-712: ENDPOINT as verifyingContract for all NADO orders
+  // NADO EIP-712: domain name = 'Nado', verifyingContract = address(uint160(productId))
   const signature = await signTypedData({
     privateKey: params.privateKey as `0x${string}`,
     domain: {
-      name: 'Vertex',
+      name: 'Nado',
       version: '0.0.1',
       chainId: CHAIN_ID,
-      verifyingContract: ENDPOINT as Address,
+      verifyingContract: getOrderVerifyingAddress(params.productId),
     },
     types: {
       Order: [
@@ -224,15 +246,17 @@ async function signOrder(params: {
         { name: 'amount', type: 'int128' },
         { name: 'expiration', type: 'uint64' },
         { name: 'nonce', type: 'uint64' },
+        { name: 'appendix', type: 'uint128' },
       ],
     },
     primaryType: 'Order',
     message: {
       sender: params.subaccount as `0x${string}`,
-      priceX18: priceX18,
+      priceX18,
       amount: amountX18,
-      expiration: expiration,
-      nonce: nonce,
+      expiration,
+      nonce,
+      appendix,
     },
   });
 
@@ -497,8 +521,36 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
       const subName = (args.subaccountName as string) || 'default';
       const subaccount = encodeSubaccount(address as string, subName);
       const ts = Math.floor(Date.now() / 1000);
-      const data = await archiveQuery({ account_snapshots: { subaccounts: [subaccount], timestamps: [ts] } }) as Record<string, Record<string, unknown[]>>;
-      const events = Object.values(Object.values(data)[0] || {})[0] as Array<{ product_id: number; post_balance: { spot?: { balance: { amount: string } }; perp?: { balance: { amount: string; v_quote_balance: string } } } }> || [];
+      const data = await archiveQuery({ account_snapshots: { subaccounts: [subaccount], timestamps: [ts] } }) as Record<string, unknown>;
+
+      // Response structure: { snapshots: [ { timestamp, balances: [ { product_id, balance: {...} } ] } ] }
+      // OR nested: { [subaccount]: { [timestamp]: [ events... ] } }
+      // Handle both formats robustly
+      let events: Array<{ product_id: number; post_balance?: { spot?: { balance: { amount: string } }; perp?: { balance: { amount: string; v_quote_balance: string } } } }> = [];
+      try {
+        if (Array.isArray(data?.snapshots)) {
+          // Direct snapshots array format
+          events = (data.snapshots as Array<{ balances: typeof events }>)[0]?.balances || [];
+        } else {
+          // Nested dict format: { subaccount_key: { timestamp_key: events[] } }
+          const outer = Object.values(data);
+          for (const val of outer) {
+            if (val && typeof val === 'object' && !Array.isArray(val)) {
+              const inner = Object.values(val as Record<string, unknown>);
+              for (const arr of inner) {
+                if (Array.isArray(arr) && arr.length > 0) {
+                  events = arr as typeof events;
+                  break;
+                }
+              }
+              if (events.length > 0) break;
+            } else if (Array.isArray(val) && val.length > 0) {
+              events = val as typeof events;
+              break;
+            }
+          }
+        }
+      } catch { /* parsing failed — return empty balances */ }
 
       const balances = events.map(e => {
         const spot = e.post_balance?.spot;
@@ -508,7 +560,7 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
         return null;
       }).filter(Boolean);
 
-      return { address, subaccount: subName, balances };
+      return { address, subaccount: subName, balances, raw: events.length === 0 ? data : undefined };
     }
 
     case 'nado_get_positions': {
@@ -519,8 +571,22 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
       const subName = (args.subaccountName as string) || 'default';
       const subaccount = encodeSubaccount(address as string, subName);
       const ts = Math.floor(Date.now() / 1000);
-      const data = await archiveQuery({ account_snapshots: { subaccounts: [subaccount], timestamps: [ts] } }) as Record<string, Record<string, unknown[]>>;
-      const events = Object.values(Object.values(data)[0] || {})[0] as Array<{ product_id: number; post_balance: { perp?: { balance: { amount: string; v_quote_balance: string; last_cumulative_funding_x18: string } } } }> || [];
+      const data = await archiveQuery({ account_snapshots: { subaccounts: [subaccount], timestamps: [ts] } }) as Record<string, unknown>;
+      let events: Array<{ product_id: number; post_balance: { perp?: { balance: { amount: string; v_quote_balance: string; last_cumulative_funding_x18: string } } } }> = [];
+      try {
+        if (Array.isArray(data?.snapshots)) {
+          events = (data.snapshots as Array<{ balances: typeof events }>)[0]?.balances || [];
+        } else {
+          for (const val of Object.values(data)) {
+            if (val && typeof val === 'object' && !Array.isArray(val)) {
+              for (const arr of Object.values(val as Record<string, unknown>)) {
+                if (Array.isArray(arr) && arr.length > 0) { events = arr as typeof events; break; }
+              }
+              if (events.length > 0) break;
+            } else if (Array.isArray(val) && val.length > 0) { events = val as typeof events; break; }
+          }
+        }
+      } catch { /* parsing failed */ }
 
       const marketByPid = Object.fromEntries(Object.entries(MARKETS).map(([sym, m]) => [m.productId.toString(), sym]));
       const positions = events
@@ -604,29 +670,22 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
       const amount = args.amount as number;
       const price = args.price as number;
 
-      // Expiration encoding: GTC = far future (1 year), IOC = now+1s, FOK = now+1s with FOK flag
-      // Vertex encodes expiration as: lower 62 bits = timestamp in seconds, upper 2 bits = order type (0=GTC, 1=IOC, 2=FOK)
+      // NADO: TIF is in appendix orderType, expiration is a plain timestamp (seconds)
       const nowSec = Math.floor(Date.now() / 1000);
-      let expirationBits: bigint;
-      if (tif === 'IOC') {
-        expirationBits = (1n << 62n) | BigInt(nowSec + 60);
-      } else if (tif === 'FOK') {
-        expirationBits = (2n << 62n) | BigInt(nowSec + 60);
-      } else {
-        // GTC: 1 year from now
-        expirationBits = BigInt(nowSec + 365 * 86400);
-      }
+      const orderType = tif === 'IOC' ? 1 : tif === 'FOK' ? 2 : 0; // 0=GTC, 1=IOC, 2=FOK
+      const expiration = tif === 'GTC'
+        ? BigInt(nowSec + 365 * 86400)  // GTC: 1 year
+        : BigInt(nowSec + 60);          // IOC/FOK: 60 seconds
 
       // For market orders (price=0), use extreme limit prices so the order fills immediately
-      const orderPrice = price > 0 ? price
-        : tif === 'GTC' ? (amount > 0 ? 999999999 : 0.000001)
-        : (amount > 0 ? 999999999 : 0.000001); // IOC/FOK market orders also need a price
+      const orderPrice = price > 0 ? price : (amount > 0 ? 999999999 : 0.000001);
 
       const { order, signature } = await signOrder({
         productId,
         price: orderPrice,
         amount,
-        expiration: expirationBits,
+        expiration,
+        orderType,
         subaccount,
         privateKey: pk,
       });
@@ -650,11 +709,11 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
       const account = privateKeyToAccount(pk as `0x${string}`);
       const subaccount = encodeSubaccount(account.address, subName);
       const digest = args.digest as string;
-      const nonce = getNonce();
+      const nonce = getOrderNonce();
 
       const signature = await signTypedData({
         privateKey: pk as `0x${string}`,
-        domain: { name: 'Vertex', version: '0.0.1', chainId: CHAIN_ID, verifyingContract: ENDPOINT as Address },
+        domain: { name: 'Nado', version: '0.0.1', chainId: CHAIN_ID, verifyingContract: ENDPOINT as Address },
         types: {
           Cancellation: [
             { name: 'sender', type: 'bytes32' },
@@ -693,11 +752,11 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
       const subName = (args.subaccountName as string) || 'default';
       const account = privateKeyToAccount(pk as `0x${string}`);
       const subaccount = encodeSubaccount(account.address, subName);
-      const nonce = getNonce();
+      const nonce = getOrderNonce();
 
       const signature = await signTypedData({
         privateKey: pk as `0x${string}`,
-        domain: { name: 'Vertex', version: '0.0.1', chainId: CHAIN_ID, verifyingContract: ENDPOINT as Address },
+        domain: { name: 'Nado', version: '0.0.1', chainId: CHAIN_ID, verifyingContract: ENDPOINT as Address },
         types: {
           CancellationProducts: [
             { name: 'sender', type: 'bytes32' },
@@ -773,13 +832,14 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
     }
 
     case 'nado_withdraw': {
+      // NADO withdrawals go through the gateway as a signed message (not direct contract call)
       const pk = process.env.EVM_PRIVATE_KEY;
       if (!pk) throw new Error('EVM_PRIVATE_KEY required');
       const account = privateKeyToAccount(pk as `0x${string}`);
       const subName = (args.subaccountName as string) || 'default';
+      const subaccount = encodeSubaccount(account.address, subName);
       const tokenArg = args.token as string;
       const amount = args.amount as number;
-      const sendTo = (args.sendTo as string) ?? account.address;
 
       const tokenUpper = tokenArg.toUpperCase();
       const tokenInfo = Object.values(SPOT_TOKENS).find(t => t.symbol === tokenUpper)
@@ -791,18 +851,47 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
       if (productId === undefined) throw new Error(`Cannot resolve productId for ${tokenArg}`);
 
       const amountRaw = BigInt(Math.round(amount * 10 ** tokenInfo.decimals));
-      const subaccountNameBytes12 = encodeSubaccountName(subName);
-      const wc = await getWalletClient();
+      const nonce = getOrderNonce();
 
-      const hash = await wc.writeContract({
-        address: ENDPOINT as Address, abi: ENDPOINT_ABI,
-        functionName: 'withdrawCollateral',
-        args: [subaccountNameBytes12, parseInt(productId), amountRaw, sendTo as Address],
-        account,
+      // Sign WithdrawCollateral via EIP-712 (NADO domain, ENDPOINT as verifyingContract)
+      const signature = await signTypedData({
+        privateKey: pk as `0x${string}`,
+        domain: {
+          name: 'Nado',
+          version: '0.0.1',
+          chainId: CHAIN_ID,
+          verifyingContract: ENDPOINT as Address,
+        },
+        types: {
+          WithdrawCollateral: [
+            { name: 'sender', type: 'bytes32' },
+            { name: 'productId', type: 'uint32' },
+            { name: 'amount', type: 'uint128' },
+            { name: 'nonce', type: 'uint64' },
+          ],
+        },
+        primaryType: 'WithdrawCollateral',
+        message: {
+          sender: subaccount as `0x${string}`,
+          productId: parseInt(productId),
+          amount: amountRaw,
+          nonce,
+        },
       });
-      await publicClient.waitForTransactionReceipt({ hash });
 
-      return { token: tokenInfo.symbol, amount, subaccount: subName, sendTo, txHash: hash };
+      const result = await gatewayExecute({
+        withdraw_collateral: {
+          tx: {
+            sender: subaccount,
+            productId: parseInt(productId),
+            amount: amountRaw.toString(),
+            nonce: nonce.toString(),
+          },
+          signature,
+        },
+      });
+
+      return { token: tokenInfo.symbol, amount, subaccount: subName, result };
     }
 
     default:
