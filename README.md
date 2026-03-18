@@ -1,6 +1,6 @@
 # moltiverse-mcp
 
-A unified [Model Context Protocol](https://modelcontextprotocol.io) server that gives AI agents full access to the Moltiverse ecosystem on [Ink](https://inkonchain.com) — Tsunami V3 DEX, Sentry Agent Launch Factory, Tydro lending, NADO perps, Citadel LP Locker, ZNS .ink domain names, on-chain analytics via Goldsky subgraph, cross-chain bridging/swaps via Relay Protocol, and CEX trading via [Kraken CLI](https://github.com/krakenfx/kraken-cli) (134 commands).
+A unified [Model Context Protocol](https://modelcontextprotocol.io) server that gives AI agents full access to the Moltiverse ecosystem on [Ink](https://inkonchain.com) — Tsunami V3 DEX, Sentry Agent Launch Factory, Tydro lending, NADO perps, Citadel LP Locker, ZNS .ink domain names, ERC-8004 agent identity, DailyGM, on-chain analytics via Goldsky subgraph, cross-chain bridging/swaps via Relay Protocol, and CEX trading via [Kraken CLI](https://github.com/krakenfx/kraken-cli) (134 commands).
 
 ## Quick Start
 
@@ -103,7 +103,7 @@ Read-only tools work without any environment variables.
 
 Public market data and paper trading work without credentials. Install the CLI from [github.com/krakenfx/kraken-cli](https://github.com/krakenfx/kraken-cli).
 
-## Tools (68 on-chain + 134 via Kraken CLI)
+## Tools (77 on-chain + 134 via Kraken CLI)
 
 ### Tsunami V3 DEX (13 tools)
 
@@ -133,6 +133,19 @@ Public market data and paper trading work without credentials. Install the CLI f
 | `sentry_get_supported_base_tokens` | Read | List supported base tokens (e.g. WETH) |
 | `sentry_get_total_deployed` | Read | Total tokens launched through Sentry |
 | `sentry_collect_fees` | Write | Harvest trading fees from LP positions — owner only, sent to treasury |
+
+### ERC-8004 Agent Identity (6 tools)
+
+[ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) is the Ethereum standard for on-chain AI agent identity (co-authored by MetaMask, Ethereum Foundation, Google, Coinbase). On Ink, the IdentityRegistry is **required before launching tokens via `sentry_launch()`**.
+
+| Tool | Type | Description |
+|---|---|---|
+| `identity_register` | Write | Register an ERC-8004 agent identity — mints an identity NFT. Required before `sentry_launch()`. |
+| `identity_check_registered` | Read | Check if a wallet holds an identity NFT (prerequisite for token launches) |
+| `identity_get_agent` | Read | Get agentURI and decoded metadata for an agent ID |
+| `identity_set_agent_uri` | Write | Update identity metadata (owner only) |
+| `identity_get_owner_agents` | Read | List all agent identity token IDs for a wallet |
+| `identity_total_registered` | Read | Total ERC-8004 identities registered on Ink |
 
 ### Tydro Lending (7 tools)
 
@@ -203,6 +216,16 @@ ZNS Connect is the domain naming service for Ink. Agents can register `.ink` dom
 | `erc20_allowance` | Read | Check spending allowance |
 | `erc20_approve` | Write | Approve a spender |
 | `erc20_transfer` | Write | Transfer ERC-20 tokens or native ETH (use zero address for ETH) |
+
+### DailyGM (3 tools)
+
+On-chain "Good Morning" protocol. Say GM, send a GM to someone, or check when someone last said GM — all recorded immutably on Ink.
+
+| Tool | Type | Description |
+|---|---|---|
+| `dailygm_gm` | Write | Say GM on-chain (once per 24 hours) |
+| `dailygm_gm_to` | Write | Send a GM to a specific address (once per 24 hours, cannot GM yourself) |
+| `dailygm_last_gm` | Read | Check when a wallet last said GM and whether they can GM again |
 
 ### Subgraph Analytics (6 tools)
 
@@ -276,6 +299,21 @@ kraken mcp -s all --allow-dangerous  # autonomous mode
 |---|---|
 | Endpoint | `0x05ec92D78ED421f3D3Ada77FFdE167106565974E` |
 
+### ERC-8004 Agent Identity
+
+| Contract | Address |
+|---|---|
+| IdentityRegistry (implementation — active) | `0x7274e874CA62410a93Bd8bf61c69d8045E399c02` |
+| IdentityRegistry (proxy — pending upgrade) | `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` |
+| ReputationRegistry (proxy) | `0x8004BAa17C55a88189AE136b182e5fdA19dE9b63` |
+| ValidationRegistry (proxy) | `0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58` |
+
+### DailyGM
+
+| Contract | Address |
+|---|---|
+| DailyGM | `0x9F500d075118272B3564ac6Ef2c70a9067Fd2d3F` |
+
 ### ZNS Connect
 
 | Contract | Address |
@@ -300,8 +338,8 @@ kraken mcp -s all --allow-dangerous  # autonomous mode
 +-------------------+--------------------------------------+-------------------+
                     | MCP (stdio)                          | MCP (stdio)
 +-------------------v------------------------------------------+ +--v---------+
-|                   moltiverse-mcp (v1.8.0)                      | | kraken mcp |
-|                          68 tools                              | |134 commands|
+|                   moltiverse-mcp (v1.10.0)                     | | kraken mcp |
+|                          77 tools                              | |134 commands|
 |  +-----------+ +-----------+ +-----------+ +-----------+        | | market     |
 |  | Tsunami   | |  Sentry   | |  Tydro    | |   NADO    |        | | account    |
 |  | 13 tools  | |  6 tools  | |  7 tools  | | 11 tools  |        | | trade      |
@@ -309,17 +347,17 @@ kraken mcp -s all --allow-dangerous  # autonomous mode
 |  | Citadel   | | Subgraph  | |   ERC20   | |   Relay   |        | | earn       |
 |  |  9 tools  | |  6 tools  | |  4 tools  | |  6 tools  |        | | futures    |
 |  +-----------+ +-----------+ +-----------+ +-----------+        | | ws  paper  |
-|  |    ZNS    |                                                  | +-----+------+
-|  |  6 tools  |                                                  |       |
-|  +-----+-----+                                                  |       |
+|  |    ZNS    | | Identity  | | DailyGM   |                      | +-----+------+
+|  |  6 tools  | |  6 tools  | |  3 tools  |                      |       |
+|  +-----+-----+ +-----------+ +-----------+                      |       |
 +--------------------------------------------------------------------------+   |
          |             |              |              |                    |
     Ink L2 RPC     Goldsky        Ink L2 RPC    NADO APIs           Kraken API
      (57073)       GraphQL         (57073)     archive +          (spot+futures)
     Tsunami /      Tsunami        Tydro /      gateway +
     Sentry /       Subgraph        ERC20       Relay API
-    Citadel /                                (50+ chains)
-    ZNS
+    Citadel /                    Identity    (50+ chains)
+    ZNS / GM
 ```
 
 ## Documentation
@@ -331,6 +369,7 @@ kraken mcp -s all --allow-dangerous  # autonomous mode
 - [Tydro Lending Protocol](docs/tydro-lending.md)
 - [NADO Perps DEX](docs/nado-perps-dex.md)
 - [ZNS Connect — .ink Domains](docs/zns-names.md)
+- [ERC-8004 Agent Identity](docs/erc8004-identity.md)
 
 ## Agent Skills
 
@@ -345,6 +384,8 @@ Step-by-step playbooks for common agent workflows — multi-step sequences, para
 - [ERC-20 Skills](docs/skills/erc20-skills.md) — Balances, approvals, native ETH transfers
 - [Subgraph Skills](docs/skills/subgraph-skills.md) — Analytics, pool discovery, position tracking
 - [ZNS Skills](docs/skills/zns-skills.md) — Registering .ink domains, resolving names, sending tokens to domains
+- [Identity Skills](docs/skills/identity-skills.md) — Registering ERC-8004 agent identity (required for token launches)
+- [DailyGM Skills](docs/skills/dailygm-skills.md) — Saying GM on-chain, sending GMs, checking cooldowns
 
 ## License
 
