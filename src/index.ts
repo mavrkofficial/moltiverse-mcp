@@ -17,6 +17,8 @@ import { relayTools, handleRelayTool } from './tools/relay.js';
 import { tydroTools, handleTydroTool } from './tools/tydro.js';
 import { nadoTools, handleNadoTool } from './tools/nado.js';
 import { znsTools, handleZnsTool } from './tools/zns.js';
+import { identityTools, handleIdentityTool } from './tools/identity.js';
+import { dailyGmTools, handleDailyGmTool } from './tools/dailygm.js';
 
 // ── All Tools ──────────────────────────────────────────────────────────
 const allTools = [
@@ -29,6 +31,8 @@ const allTools = [
   ...tydroTools,
   ...nadoTools,
   ...znsTools,
+  ...identityTools,
+  ...dailyGmTools,
 ];
 
 // ── Route tool calls ───────────────────────────────────────────────────
@@ -42,6 +46,8 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
   if (name.startsWith('tydro_'))    return handleTydroTool(name, args);
   if (name.startsWith('nado_'))     return handleNadoTool(name, args);
   if (name.startsWith('zns_'))      return handleZnsTool(name, args);
+  if (name.startsWith('identity_')) return handleIdentityTool(name, args);
+  if (name.startsWith('dailygm_'))  return handleDailyGmTool(name, args);
   throw new Error(`Unknown tool: ${name}`);
 }
 
@@ -75,7 +81,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`moltiverse-mcp v1.8.0 — ${allTools.length} tools registered`);
+  console.error(`moltiverse-mcp v1.10.0 — ${allTools.length} tools registered`);
 }
 
 main().catch((err) => {
