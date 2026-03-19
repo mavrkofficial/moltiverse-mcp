@@ -60,6 +60,7 @@
     "zns-sdk": "^0.0.6-1"
   },
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "typescript": "^5.8.0"
   },
   "optionalDependencies": {
