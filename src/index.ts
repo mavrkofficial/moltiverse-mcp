@@ -53,7 +53,7 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
 
 // ── Server Setup ───────────────────────────────────────────────────────
 const server = new Server(
-  { name: 'moltiverse-mcp', version: '1.10.1' },
+  { name: 'moltiverse-mcp', version: '1.10.2' },
   { capabilities: { tools: {} } },
 );
 
@@ -81,7 +81,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`moltiverse-mcp v1.10.1 — ${allTools.length} tools registered`);
+  console.error(`moltiverse-mcp v1.10.2 — ${allTools.length} tools registered`);
 }
 
 main().catch((err) => {

@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.10.2] — 2026-03-19
+
+### Added
+- GitHub Actions CI pipeline (typecheck + build on PRs and pushes to main).
+- CHANGELOG.md with retroactive history from v1.7.0.
+
+### Fixed
+- Version string mismatch: Server constructor and startup log now match `package.json`.
+- Added `@types/node` to devDependencies for correct CI type-checking.
+- TypeScript narrowing in `keychain.ts` for `process.env` assignment.
+
+### Changed
+- Branch protection enabled on `main` (force pushes blocked, PRs required).
+- Secret scanning and push protection enabled on GitHub.
+- Squash-only merges with auto-delete of merged branches.
+- CHANGELOG.md now included in npm package.
+
 ## [1.10.1] — 2026-03-18
 
 ### Changed
