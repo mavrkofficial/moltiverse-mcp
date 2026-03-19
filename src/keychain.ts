@@ -17,8 +17,9 @@ async function loadKeytar() {
 export async function getPrivateKey(): Promise<string | null> {
   if (_cached !== undefined) return _cached;
 
-  if (process.env.EVM_PRIVATE_KEY) {
-    _cached = process.env.EVM_PRIVATE_KEY;
+  const envKey = process.env.EVM_PRIVATE_KEY;
+  if (envKey) {
+    _cached = envKey;
     return _cached;
   }
 
