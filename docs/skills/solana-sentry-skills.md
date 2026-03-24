@@ -171,3 +171,15 @@ Use `solana_sentry_list` to get every token deployed through the factory. Filter
 ### Factory Stats
 
 Use `solana_sentry_stats` for total launches, admin, treasury, and buyback config.
+
+---
+
+## Solana Development Reference
+
+For general Solana development skills (Anchor programs, testing, security, common errors, version compatibility), install the Solana Foundation's official skill set:
+
+```
+npx skills add https://github.com/solana-foundation/solana-dev-skill
+```
+
+Full reference: https://solana.com/SKILL.md
