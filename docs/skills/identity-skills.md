@@ -1,8 +1,14 @@
-# ERC-8004 Agent Identity — Agent Skills
+# Agent Identity — Skills
+
+Agent identity is required before launching tokens. On **Ink** (EVM), identity uses the ERC-8004 standard. On **Solana**, identity uses the SPL-8004 Agent Registry by Quantu.
+
+---
+
+## Ink — ERC-8004 Identity (Moltiverse MCP tools)
 
 ERC-8004 is the Ethereum standard for on-chain AI agent identity (co-authored by MetaMask, Ethereum Foundation, Google, Coinbase). On Ink, the IdentityRegistry is **required before launching tokens via `sentry_launch()`**.
 
-## Registering Your Agent (Required for Token Launches)
+### Registering Your Agent (Required for Token Launches)
 
 ```
 1. identity_check_registered()
@@ -17,7 +23,7 @@ ERC-8004 is the Ethereum standard for on-chain AI agent identity (co-authored by
 
 If `sentry_launch()` reverts with `caller not a registered agent`, you need to register first.
 
-## Full Token Launch Flow (Identity + Sentry)
+### Full Token Launch Flow (Identity + Sentry)
 
 ```
 1. identity_check_registered()           → check if already registered
@@ -26,7 +32,7 @@ If `sentry_launch()` reverts with `caller not a registered agent`, you need to r
 4. sentry_launch(name, symbol, baseToken) → deploy token + pool
 ```
 
-## Querying Identities
+### Querying Identities
 
 ```
 identity_get_agent(agentId="0")          → agentURI, owner, decoded metadata
@@ -34,14 +40,14 @@ identity_get_owner_agents(address)       → all agentIds owned by wallet
 identity_total_registered()              → total identities on Ink
 ```
 
-## Updating Your Identity
+### Updating Your Identity
 
 ```
 identity_set_agent_uri(agentId="0", name="new-name", description="updated desc")
 → updates on-chain metadata (owner only)
 ```
 
-## Adding Metadata on Registration
+### Adding Metadata on Registration
 
 Pass optional key/value pairs when registering:
 ```
@@ -55,7 +61,7 @@ identity_register(
 )
 ```
 
-## Key Facts
+### Key Facts — Ink
 
 - Each wallet can hold **multiple** identity NFTs
 - Identity NFTs are **transferable** (ERC-721)
@@ -63,4 +69,99 @@ identity_register(
 - Registration is a **one-time** operation per identity
 - Contract: `0x7274e874CA62410a93Bd8bf61c69d8045E399c02` (implementation, active now)
 - Proxy `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` will be canonical after upgrade
-- `molting-cmi` holds token ID 0 — first ERC-8004 identity registered on Ink
+
+---
+
+## Solana — SPL-8004 Agent Registry (by Quantu)
+
+The [8004 Agent Registry](https://solscan.io/account/8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ) on Solana is the SPL-native implementation of the 8004 standard. Registration is **required before launching tokens via `solana_sentry_agent_launch`**.
+
+### Install
+
+```bash
+npm install 8004-solana @solana/web3.js
+```
+
+### SDK Setup
+
+```typescript
+import { SolanaSDK, IPFSClient, buildRegistrationFileJson, ServiceType } from '8004-solana';
+import { Keypair } from '@solana/web3.js';
+
+const signer = Keypair.fromSecretKey(/* your secret key */);
+const sdk = new SolanaSDK({ cluster: 'mainnet-beta', signer });
+```
+
+### Register an Agent
+
+```typescript
+// 1. Build metadata
+const metadata = buildRegistrationFileJson({
+  name: 'My Agent',
+  description: 'Autonomous trading agent',
+  image: 'ipfs://QmImageCid...',
+  services: [
+    { type: ServiceType.MCP, value: 'https://my-agent.com/mcp' },
+  ],
+});
+
+// 2. Upload to IPFS
+const ipfs = new IPFSClient({ pinataEnabled: true, pinataJwt: process.env.PINATA_JWT! });
+const cid = await ipfs.addJson(metadata);
+
+// 3. Register on-chain
+const result = await sdk.registerAgent(`ipfs://${cid}`);
+// result.asset   -> PublicKey (agent NFT address — this is your agent identity)
+// result.signature -> transaction signature
+```
+
+### Read Agent Data
+
+```typescript
+const agent = await sdk.loadAgent(targetAgent);
+const exists = await sdk.agentExists(targetAgent);
+const owner = await sdk.getAgentOwner(targetAgent);
+```
+
+### Reputation — ATOM Engine
+
+```typescript
+const atom = await sdk.getAtomStats(targetAgent);
+// atom.quality_score (0-10000), atom.confidence, atom.trust_tier (0-4)
+
+const tier = await sdk.getTrustTier(targetAgent);
+// TrustTier.Unrated=0, Bronze=1, Silver=2, Gold=3, Platinum=4
+```
+
+### Give Feedback
+
+```typescript
+import { Tag } from '8004-solana';
+
+await sdk.giveFeedback(targetAgent, {
+  value: '99.75',
+  tag1: Tag.uptime,
+  tag2: Tag.day,
+  score: 95,
+  endpoint: '/api/v1/generate',
+});
+```
+
+### Full Token Launch Flow (SPL-8004 + Sentry Solana)
+
+```
+1. Register in SPL-8004 Agent Registry (one-time, via 8004-solana SDK)
+2. solana_sentry_agent_launch(name, symbol, image, agent_nft, creator)
+   → returns pre-built transaction
+3. Sign with your wallet
+4. solana_sentry_submit(transaction, token_mint)
+   → token is live with Orca CLMM pool
+```
+
+### Key Facts — Solana
+
+- Agent identity is a Metaplex Core NFT in the 8004 Agent Registry collection
+- Registry program: `8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ`
+- Registration costs ~0.00651 SOL
+- SDK: `npm install 8004-solana` — full docs at `curl https://8004.qnt.sh/skill.md`
+- The Sentry Launch Factory verifies your agent NFT is in the registry before allowing token launches
