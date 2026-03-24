@@ -1,4 +1,4 @@
-# Solana Orca Whirlpool — Skills
+# Solana Swap — Skills (Orca Whirlpool + Jupiter)
 
 ## Get Pool Info
 

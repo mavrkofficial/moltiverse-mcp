@@ -410,7 +410,7 @@ kraken mcp -s all --allow-dangerous  # autonomous mode
 Step-by-step playbooks for common agent workflows — multi-step sequences, parameter gotchas, and cross-protocol flows.
 
 - [Solana Sentry Skills](docs/skills/solana-sentry-skills.md) — Deploying tokens on Solana, querying the factory registry
-- [Solana Orca Skills](docs/skills/solana-orca-skills.md) — Swapping on Orca Whirlpools, dev buys
+- [Solana Swap Skills](docs/skills/solana-swap-skills.md) — Swapping on Orca Whirlpools, Jupiter aggregator, dev buys
 - [Tsunami Skills](docs/skills/tsunami-skills.md) — Swapping, LP management, buying NAMI
 - [Sentry Skills](docs/skills/sentry-skills.md) — Launching tokens
 - [Citadel Skills](docs/skills/citadel-skills.md) — Locking LP, collecting and routing fees
