@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.11.1] — 2026-03-24
+
+### Fixed
+- **`solana_orca_swap` failing on fresh pools** — Error 3012 (`TickArraySequenceInvalidIndex`) on newly launched tokens. Ported battle-tested swap logic from SentryBot:
+  - Tick array stride calculation was overshooting by 3x; corrected to `TICK_ARRAY_SIZE * tickSpacing` per step.
+  - Auto-initializes missing standard tick arrays in the same transaction (fresh pools only have dynamic tick arrays from LP provisioning).
+  - Fixed `initialize_tick_array` Anchor discriminator and account ordering.
+  - Added idempotent ATA creation for both token accounts.
+  - Added WSOL wrapping (`SystemProgram.transfer` + `syncNative`) for SOL-input swaps.
+  - Added WSOL unwrapping (`closeAccount`) for SOL-output swaps.
+  - 3-attempt retry with tick index nudge (±1) on boundary errors.
+
 ## [1.11.0] — 2026-03-23
 
 ### Added
