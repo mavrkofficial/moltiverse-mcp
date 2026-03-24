@@ -369,8 +369,8 @@ kraken mcp -s all --allow-dangerous  # autonomous mode
 +-------------------+--------------------------------------+-------------------+
                     | MCP (stdio)                          | MCP (stdio)
 +-------------------v------------------------------------------+ +--v---------+
-|                   moltiverse-mcp (v1.10.0)                     | | kraken mcp |
-|                          77 tools                              | |134 commands|
+|                   moltiverse-mcp (v1.11.0)                     | | kraken mcp |
+|                          85 tools                              | |134 commands|
 |  +-----------+ +-----------+ +-----------+ +-----------+        | | market     |
 |  | Tsunami   | |  Sentry   | |  Tydro    | |   NADO    |        | | account    |
 |  | 13 tools  | |  6 tools  | |  7 tools  | | 11 tools  |        | | trade      |
@@ -380,7 +380,10 @@ kraken mcp -s all --allow-dangerous  # autonomous mode
 |  +-----------+ +-----------+ +-----------+ +-----------+        | | ws  paper  |
 |  |    ZNS    | | Identity  | | DailyGM   |                      | +-----+------+
 |  |  6 tools  | |  6 tools  | |  3 tools  |                      |       |
-|  +-----+-----+ +-----------+ +-----------+                      |       |
+|  +-----------+ +-----------+ +-----------+                      |       |
+|  | Sol Sentry| | Sol Orca  |                                     |       |
+|  |  5 tools  | |  3 tools  |                                     |       |
+|  +-----------+ +-----------+                                     |       |
 +--------------------------------------------------------------------------+   |
          |             |              |              |                    |
     Ink L2 RPC     Goldsky        Ink L2 RPC    NADO APIs           Kraken API
@@ -388,7 +391,7 @@ kraken mcp -s all --allow-dangerous  # autonomous mode
     Tsunami /      Tsunami        Tydro /      gateway +
     Sentry /       Subgraph        ERC20       Relay API
     Citadel /                    Identity    (50+ chains)
-    ZNS / GM
+    ZNS / GM                     Sol RPC
 ```
 
 ## Documentation
