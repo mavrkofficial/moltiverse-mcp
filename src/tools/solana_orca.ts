@@ -71,28 +71,24 @@ export const solanaOrcaTools = [
 ];
 
 function parseWhirlpoolData(data: Buffer) {
-  let offset = 8; // discriminator
-  offset += 32; // whirlpoolsConfig
-  const whirlpoolBump = data.readUInt8(offset); offset += 2; // bump[0], bump[1]
-  const tickSpacing = data.readUInt16LE(offset); offset += 2;
-  offset += 2; // tickSpacingSeed
-  const feeRate = data.readUInt16LE(offset); offset += 2;
-  offset += 2; // protocolFeeRate
-  const liquidityHex = data.readBigUInt64LE(offset).toString(); offset += 16; // u128
-  const sqrtPrice = data.readBigUInt64LE(offset).toString(); offset += 16; // u128
-  const tickCurrentIndex = data.readInt32LE(offset); offset += 4;
-  offset += 8; // protocolFeeOwedA (u64)
-  offset += 8; // protocolFeeOwedB (u64)
-  const tokenMintA = new PublicKey(data.subarray(offset, offset + 32)).toBase58(); offset += 32;
-  const tokenMintB = new PublicKey(data.subarray(offset, offset + 32)).toBase58(); offset += 32;
-  const tokenVaultA = new PublicKey(data.subarray(offset, offset + 32)).toBase58(); offset += 32;
-  const tokenVaultB = new PublicKey(data.subarray(offset, offset + 32)).toBase58(); offset += 32;
+  // Fixed byte offsets matching SentryBot's proven layout:
+  // bump @40 (1 byte), tickSpacing @41, feeRate @45, liquidity @49 (u128),
+  // sqrtPrice @65 (u128), tickCurrentIndex @81, mintA @101, vaultA @133,
+  // mintB @181, vaultB @213
+  const tickSpacing = data.readUInt16LE(41);
+  const feeRate = data.readUInt16LE(45);
+  const liquidity = data.readBigUInt64LE(49).toString();
+  const sqrtPrice = data.readBigUInt64LE(65).toString();
+  const tickCurrentIndex = data.readInt32LE(81);
+  const tokenMintA = new PublicKey(data.subarray(101, 133)).toBase58();
+  const tokenVaultA = new PublicKey(data.subarray(133, 165)).toBase58();
+  const tokenMintB = new PublicKey(data.subarray(181, 213)).toBase58();
+  const tokenVaultB = new PublicKey(data.subarray(213, 245)).toBase58();
 
   return {
     tickSpacing, feeRate, feePercent: `${(feeRate / 10000).toFixed(2)}%`,
-    liquidity: liquidityHex, sqrtPrice,
-    tickCurrentIndex, tokenMintA, tokenMintB,
-    tokenVaultA, tokenVaultB,
+    liquidity, sqrtPrice, tickCurrentIndex,
+    tokenMintA, tokenMintB, tokenVaultA, tokenVaultB,
   };
 }
 

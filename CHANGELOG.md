@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.11.3] — 2026-03-24
+
+### Fixed
+- **`parseWhirlpoolData` byte offsets were wrong — root cause of all swap failures.** The Whirlpool bump field is 1 byte, not 2. This 1-byte misalignment corrupted every downstream field: tickSpacing read as 32768 instead of 128, tickCurrentIndex as -1.1 billion, and mints resolved to nonexistent addresses. All pool reads (pool_info, quote, swap) now use SentryBot's proven fixed offsets (tickSpacing @41, liquidity @49, sqrtPrice @65, tickCurrentIndex @81, mintA @101, vaultA @133, mintB @181, vaultB @213).
+
 ## [1.11.2] — 2026-03-24
 
 ### Fixed
