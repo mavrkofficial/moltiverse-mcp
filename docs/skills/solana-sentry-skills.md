@@ -174,20 +174,6 @@ Use `solana_sentry_stats` for total launches, admin, treasury, and buyback confi
 
 ---
 
-## Solana Development Reference
+## Swapping After Launch
 
-For general Solana development skills (Anchor programs, testing, security, common errors, version compatibility), install the Solana Foundation's official skill set:
-
-```
-npx skills add https://github.com/solana-foundation/solana-dev-skill
-```
-
-Full reference: https://solana.com/SKILL.md
-
-For Helius Build skills (DAS for NFT/asset reads, Sender for reliable transaction landing with dynamic priority fees, WebSockets, LaserStream, Webhooks):
-
-```
-npx skills add helius-labs/core-ai --skill build
-```
-
-Full reference: https://www.helius.dev/docs/agents/skills/build
+See **solana-swap-skills** for the full swap flow — how to go from a token mint address to an executed Orca swap or Jupiter fallback.
