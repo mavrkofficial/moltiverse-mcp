@@ -1,5 +1,5 @@
-import { Connection, PublicKey, Keypair, VersionedTransaction, TransactionMessage, ComputeBudgetProgram, TransactionInstruction } from '@solana/web3.js';
-import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, NATIVE_MINT } from '@solana/spl-token';
+import { Connection, PublicKey, Keypair, VersionedTransaction, TransactionMessage, Transaction, ComputeBudgetProgram, TransactionInstruction, SystemProgram } from '@solana/web3.js';
+import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, NATIVE_MINT, createAssociatedTokenAccountIdempotentInstruction, createSyncNativeInstruction, createCloseAccountInstruction } from '@solana/spl-token';
 import { SOLANA_CONFIG } from '../config.js';
 import { getSolanaKeypair } from '../keychain.js';
 import BN from 'bn.js';
@@ -150,104 +150,171 @@ export async function handleSolanaOrcaTool(name: string, args: Record<string, un
 
       const poolPk = new PublicKey(args.pool as string);
       const inputMint = new PublicKey(args.input_mint as string);
-      const amount = BigInt(args.amount as string);
+      const amountIn = BigInt(args.amount as string);
       const slippageBps = (args.slippage_bps as number) || 100;
-
-      const info = await connection.getAccountInfo(poolPk);
-      if (!info) throw new Error('Pool not found');
-      const poolData = parseWhirlpoolData(Buffer.from(info.data));
-
-      const aToB = inputMint.toBase58() === poolData.tokenMintA;
-      const mintA = new PublicKey(poolData.tokenMintA);
-      const mintB = new PublicKey(poolData.tokenMintB);
-
-      const ownerAtaA = getAssociatedTokenAddressSync(mintA, wallet.publicKey, false, TOKEN_PROGRAM_ID);
-      const ownerAtaB = getAssociatedTokenAddressSync(mintB, wallet.publicKey, false, TOKEN_PROGRAM_ID);
-      const vaultA = new PublicKey(poolData.tokenVaultA);
-      const vaultB = new PublicKey(poolData.tokenVaultB);
-
-      const oraclePDA = findPDA([Buffer.from('oracle'), poolPk.toBuffer()], WHIRLPOOL_PROGRAM);
-
-      const ts = poolData.tickSpacing as number;
-      const currentTick = poolData.tickCurrentIndex as number;
-      const shift = aToB ? -3 : 3;
-      const ta0Start = getTickArrayStart(currentTick, ts);
-      const ta1Start = getTickArrayStart(currentTick + shift * TICK_ARRAY_SIZE * ts, ts);
-      const ta2Start = getTickArrayStart(currentTick + shift * 2 * TICK_ARRAY_SIZE * ts, ts);
-
-      const tickArray0 = findPDA([Buffer.from('tick_array'), poolPk.toBuffer(), Buffer.from(ta0Start.toString())], WHIRLPOOL_PROGRAM);
-      const tickArray1 = findPDA([Buffer.from('tick_array'), poolPk.toBuffer(), Buffer.from(ta1Start.toString())], WHIRLPOOL_PROGRAM);
-      const tickArray2 = findPDA([Buffer.from('tick_array'), poolPk.toBuffer(), Buffer.from(ta2Start.toString())], WHIRLPOOL_PROGRAM);
-
-      // sqrt_price_limit: 0 for max slippage, or compute from slippage
-      const sqrtPriceLimit = aToB
-        ? new BN('4295048016') // MIN_SQRT_PRICE
-        : new BN('79226673515401279992447579055'); // MAX_SQRT_PRICE
-
-      // swap_v2 discriminator
-      const disc = Buffer.from([43, 4, 237, 11, 26, 201, 30, 98]);
-      const swapData = Buffer.alloc(8 + 8 + 8 + 16 + 1 + 1 + 1);
-      let o = 0;
-      disc.copy(swapData, o); o += 8;
-      swapData.writeBigUInt64LE(amount, o); o += 8;
-      swapData.writeBigUInt64LE(0n, o); o += 8; // otherAmountThreshold (0 = accept any)
-      sqrtPriceLimit.toArrayLike(Buffer, 'le', 16).copy(swapData, o); o += 16;
-      swapData[o] = 1; o += 1; // amountSpecifiedIsInput = true
-      swapData[o] = aToB ? 1 : 0; o += 1; // aToB
-      swapData[o] = 0; // remainingAccountsInfo = None
-
       const MEMO_PROGRAM = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 
-      const ix = new TransactionInstruction({
-        programId: WHIRLPOOL_PROGRAM,
-        keys: [
-          { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-          { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-          { pubkey: MEMO_PROGRAM, isSigner: false, isWritable: false },
-          { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
-          { pubkey: poolPk, isSigner: false, isWritable: true },
-          { pubkey: mintA, isSigner: false, isWritable: false },
-          { pubkey: mintB, isSigner: false, isWritable: false },
-          { pubkey: ownerAtaA, isSigner: false, isWritable: true },
-          { pubkey: vaultA, isSigner: false, isWritable: true },
-          { pubkey: ownerAtaB, isSigner: false, isWritable: true },
-          { pubkey: vaultB, isSigner: false, isWritable: true },
-          { pubkey: tickArray0, isSigner: false, isWritable: true },
-          { pubkey: tickArray1, isSigner: false, isWritable: true },
-          { pubkey: tickArray2, isSigner: false, isWritable: true },
-          { pubkey: oraclePDA, isSigner: false, isWritable: true },
-        ],
-        data: swapData,
-      });
+      const maxAttempts = 3;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const info = await connection.getAccountInfo(poolPk);
+          if (!info) throw new Error('Pool not found');
+          const poolData = parseWhirlpoolData(Buffer.from(info.data));
 
-      const cuIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 });
-      const priorityIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 });
+          const aToB = inputMint.toBase58() === poolData.tokenMintA;
+          const mintA = new PublicKey(poolData.tokenMintA);
+          const mintB = new PublicKey(poolData.tokenMintB);
+          const inputIsSOL = inputMint.equals(NATIVE_MINT);
+          const outputMint = aToB ? mintB : mintA;
+          const outputIsSOL = outputMint.equals(NATIVE_MINT);
 
-      const { blockhash } = await connection.getLatestBlockhash('confirmed');
-      const msg = new TransactionMessage({
-        payerKey: wallet.publicKey,
-        recentBlockhash: blockhash,
-        instructions: [cuIx, priorityIx, ix],
-      }).compileToV0Message();
+          const ownerAtaA = getAssociatedTokenAddressSync(mintA, wallet.publicKey, false, TOKEN_PROGRAM_ID);
+          const ownerAtaB = getAssociatedTokenAddressSync(mintB, wallet.publicKey, false, TOKEN_PROGRAM_ID);
+          const vaultA = new PublicKey(poolData.tokenVaultA);
+          const vaultB = new PublicKey(poolData.tokenVaultB);
+          const oraclePDA = findPDA([Buffer.from('oracle'), poolPk.toBuffer()], WHIRLPOOL_PROGRAM);
 
-      const vtx = new VersionedTransaction(msg);
-      vtx.sign([wallet]);
+          const ts = poolData.tickSpacing as number;
+          const currentTick = poolData.tickCurrentIndex as number;
+          const arrayStep = TICK_ARRAY_SIZE * ts;
 
-      const sig = await connection.sendTransaction(vtx, { skipPreflight: true });
-      const confirmation = await connection.confirmTransaction(sig, 'confirmed');
+          // Nudge tick on first attempt to avoid boundary issues (SentryBot pattern)
+          const swapTick = attempt === 1
+            ? (aToB ? currentTick - 1 : currentTick + 1)
+            : currentTick;
 
-      if (confirmation.value.err) {
-        throw new Error(`Swap failed on-chain: ${JSON.stringify(confirmation.value.err)}`);
+          const ta0Start = getTickArrayStart(swapTick, ts);
+          let ta1Start: number, ta2Start: number;
+          if (aToB) {
+            ta1Start = ta0Start - arrayStep;
+            ta2Start = ta1Start - arrayStep;
+          } else {
+            ta1Start = ta0Start + arrayStep;
+            ta2Start = ta1Start + arrayStep;
+          }
+
+          const tickArray0 = findPDA([Buffer.from('tick_array'), poolPk.toBuffer(), Buffer.from(ta0Start.toString())], WHIRLPOOL_PROGRAM);
+          const tickArray1 = findPDA([Buffer.from('tick_array'), poolPk.toBuffer(), Buffer.from(ta1Start.toString())], WHIRLPOOL_PROGRAM);
+          const tickArray2 = findPDA([Buffer.from('tick_array'), poolPk.toBuffer(), Buffer.from(ta2Start.toString())], WHIRLPOOL_PROGRAM);
+
+          const tx = new Transaction();
+          tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
+          tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
+
+          // Idempotent ATA creation for both tokens
+          tx.add(createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, ownerAtaA, wallet.publicKey, mintA));
+          tx.add(createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, ownerAtaB, wallet.publicKey, mintB));
+
+          // WSOL wrap: transfer SOL into WSOL ATA then sync
+          if (inputIsSOL) {
+            const wsolAccount = aToB ? ownerAtaA : ownerAtaB;
+            tx.add(SystemProgram.transfer({
+              fromPubkey: wallet.publicKey,
+              toPubkey: wsolAccount,
+              lamports: amountIn,
+            }));
+            tx.add(createSyncNativeInstruction(wsolAccount));
+          }
+
+          // Initialize missing tick arrays (fresh pools only have dynamic tick arrays from LP)
+          const initTickArrayDisc = Buffer.from([11, 188, 193, 214, 141, 91, 149, 184]);
+          const tickArrayMeta = [
+            { pda: tickArray0, start: ta0Start },
+            { pda: tickArray1, start: ta1Start },
+            { pda: tickArray2, start: ta2Start },
+          ];
+          const multiInfo = await connection.getMultipleAccountsInfo(tickArrayMeta.map(t => t.pda));
+          for (let i = 0; i < tickArrayMeta.length; i++) {
+            if (!multiInfo[i]) {
+              const initData = Buffer.alloc(8 + 4);
+              initTickArrayDisc.copy(initData, 0);
+              initData.writeInt32LE(tickArrayMeta[i].start, 8);
+              tx.add(new TransactionInstruction({
+                programId: WHIRLPOOL_PROGRAM,
+                keys: [
+                  { pubkey: poolPk, isSigner: false, isWritable: false },
+                  { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+                  { pubkey: tickArrayMeta[i].pda, isSigner: false, isWritable: true },
+                  { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+                ],
+                data: initData,
+              }));
+            }
+          }
+
+          // swap_v2 instruction
+          const sqrtPriceLimit = aToB
+            ? new BN('4295048016')
+            : new BN('79226673515401279992447579055');
+
+          const disc = Buffer.from([43, 4, 237, 11, 26, 201, 30, 98]);
+          const swapData = Buffer.alloc(8 + 8 + 8 + 16 + 1 + 1 + 1);
+          let o = 0;
+          disc.copy(swapData, o); o += 8;
+          swapData.writeBigUInt64LE(amountIn, o); o += 8;
+          swapData.writeBigUInt64LE(0n, o); o += 8;
+          sqrtPriceLimit.toArrayLike(Buffer, 'le', 16).copy(swapData, o); o += 16;
+          swapData[o] = 1; o += 1; // amountSpecifiedIsInput
+          swapData[o] = aToB ? 1 : 0; o += 1;
+          swapData[o] = 0; // remainingAccountsInfo = None
+
+          tx.add(new TransactionInstruction({
+            programId: WHIRLPOOL_PROGRAM,
+            keys: [
+              { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+              { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+              { pubkey: MEMO_PROGRAM, isSigner: false, isWritable: false },
+              { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+              { pubkey: poolPk, isSigner: false, isWritable: true },
+              { pubkey: mintA, isSigner: false, isWritable: false },
+              { pubkey: mintB, isSigner: false, isWritable: false },
+              { pubkey: ownerAtaA, isSigner: false, isWritable: true },
+              { pubkey: vaultA, isSigner: false, isWritable: true },
+              { pubkey: ownerAtaB, isSigner: false, isWritable: true },
+              { pubkey: vaultB, isSigner: false, isWritable: true },
+              { pubkey: tickArray0, isSigner: false, isWritable: true },
+              { pubkey: tickArray1, isSigner: false, isWritable: true },
+              { pubkey: tickArray2, isSigner: false, isWritable: true },
+              { pubkey: oraclePDA, isSigner: false, isWritable: true },
+            ],
+            data: swapData,
+          }));
+
+          // WSOL unwrap: close WSOL ATA to get native SOL back
+          if (outputIsSOL) {
+            const wsolAccount = aToB ? ownerAtaB : ownerAtaA;
+            tx.add(createCloseAccountInstruction(wsolAccount, wallet.publicKey, wallet.publicKey));
+          }
+
+          tx.feePayer = wallet.publicKey;
+          const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+          tx.recentBlockhash = blockhash;
+          tx.sign(wallet);
+
+          const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true, maxRetries: 3 });
+          const confirmation = await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+
+          if (confirmation.value.err) {
+            throw new Error(`Swap failed on-chain: ${JSON.stringify(confirmation.value.err)}`);
+          }
+
+          return {
+            signature: sig,
+            explorer: `https://solscan.io/tx/${sig}`,
+            pool: args.pool,
+            input_mint: args.input_mint,
+            amount: amountIn.toString(),
+            direction: aToB ? 'A→B' : 'B→A',
+          };
+        } catch (e: any) {
+          const msg = `${e?.message || e}`;
+          const retryable = msg.includes('TickArraySequenceInvalidIndex') || msg.includes('0x1796') || msg.includes('3012');
+          if (!retryable || attempt === maxAttempts) throw e;
+          // Wait briefly then retry with different tick alignment
+          await new Promise(r => setTimeout(r, 500));
+        }
       }
-
-      return {
-        signature: sig,
-        explorer: `https://solscan.io/tx/${sig}`,
-        pool: args.pool,
-        input_mint: args.input_mint,
-        amount: amount.toString(),
-        direction: aToB ? 'A→B' : 'B→A',
-      };
+      throw new Error('Swap failed after all retry attempts');
     }
 
     default:
