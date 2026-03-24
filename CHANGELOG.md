@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.11.2] — 2026-03-24
+
+### Fixed
+- **`solana_orca_swap` `IncorrectProgramId` on Token-2022 mints** — The swap instruction was hardcoding `TOKEN_PROGRAM_ID` for both token accounts. Now dynamically resolves each mint's token program (Token Program vs Token-2022) and uses the correct program for ATA derivation, ATA creation, WSOL sync/close, and `swap_v2` account keys.
+
 ## [1.11.1] — 2026-03-24
 
 ### Fixed

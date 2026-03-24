@@ -1,5 +1,5 @@
 import { Connection, PublicKey, Keypair, VersionedTransaction, TransactionMessage, Transaction, ComputeBudgetProgram, TransactionInstruction, SystemProgram } from '@solana/web3.js';
-import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, NATIVE_MINT, createAssociatedTokenAccountIdempotentInstruction, createSyncNativeInstruction, createCloseAccountInstruction } from '@solana/spl-token';
+import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, NATIVE_MINT, createAssociatedTokenAccountIdempotentInstruction, createSyncNativeInstruction, createCloseAccountInstruction } from '@solana/spl-token';
 import { SOLANA_CONFIG } from '../config.js';
 import { getSolanaKeypair } from '../keychain.js';
 import BN from 'bn.js';
@@ -9,6 +9,12 @@ const WHIRLPOOLS_CONFIG = new PublicKey(SOLANA_CONFIG.OrcaWhirlpoolsConfig);
 const connection = new Connection(SOLANA_CONFIG.rpcUrl, 'confirmed');
 
 const TICK_ARRAY_SIZE = 88;
+
+async function getTokenProgramForMint(mint: PublicKey): Promise<PublicKey> {
+  const info = await connection.getAccountInfo(mint);
+  if (!info) return TOKEN_PROGRAM_ID;
+  return info.owner.equals(TOKEN_2022_PROGRAM_ID) ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+}
 
 function findPDA(seeds: (Buffer | Uint8Array)[], pid: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(seeds, pid)[0];
@@ -168,8 +174,13 @@ export async function handleSolanaOrcaTool(name: string, args: Record<string, un
           const outputMint = aToB ? mintB : mintA;
           const outputIsSOL = outputMint.equals(NATIVE_MINT);
 
-          const ownerAtaA = getAssociatedTokenAddressSync(mintA, wallet.publicKey, false, TOKEN_PROGRAM_ID);
-          const ownerAtaB = getAssociatedTokenAddressSync(mintB, wallet.publicKey, false, TOKEN_PROGRAM_ID);
+          const [tokenProgramA, tokenProgramB] = await Promise.all([
+            getTokenProgramForMint(mintA),
+            getTokenProgramForMint(mintB),
+          ]);
+
+          const ownerAtaA = getAssociatedTokenAddressSync(mintA, wallet.publicKey, false, tokenProgramA);
+          const ownerAtaB = getAssociatedTokenAddressSync(mintB, wallet.publicKey, false, tokenProgramB);
           const vaultA = new PublicKey(poolData.tokenVaultA);
           const vaultB = new PublicKey(poolData.tokenVaultB);
           const oraclePDA = findPDA([Buffer.from('oracle'), poolPk.toBuffer()], WHIRLPOOL_PROGRAM);
@@ -201,19 +212,20 @@ export async function handleSolanaOrcaTool(name: string, args: Record<string, un
           tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
           tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
 
-          // Idempotent ATA creation for both tokens
-          tx.add(createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, ownerAtaA, wallet.publicKey, mintA));
-          tx.add(createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, ownerAtaB, wallet.publicKey, mintB));
+          // Idempotent ATA creation for both tokens (with correct token program per mint)
+          tx.add(createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, ownerAtaA, wallet.publicKey, mintA, tokenProgramA));
+          tx.add(createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, ownerAtaB, wallet.publicKey, mintB, tokenProgramB));
 
           // WSOL wrap: transfer SOL into WSOL ATA then sync
           if (inputIsSOL) {
             const wsolAccount = aToB ? ownerAtaA : ownerAtaB;
+            const wsolProgram = aToB ? tokenProgramA : tokenProgramB;
             tx.add(SystemProgram.transfer({
               fromPubkey: wallet.publicKey,
               toPubkey: wsolAccount,
               lamports: amountIn,
             }));
-            tx.add(createSyncNativeInstruction(wsolAccount));
+            tx.add(createSyncNativeInstruction(wsolAccount, wsolProgram));
           }
 
           // Initialize missing tick arrays (fresh pools only have dynamic tick arrays from LP)
@@ -261,8 +273,8 @@ export async function handleSolanaOrcaTool(name: string, args: Record<string, un
           tx.add(new TransactionInstruction({
             programId: WHIRLPOOL_PROGRAM,
             keys: [
-              { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-              { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+              { pubkey: tokenProgramA, isSigner: false, isWritable: false },
+              { pubkey: tokenProgramB, isSigner: false, isWritable: false },
               { pubkey: MEMO_PROGRAM, isSigner: false, isWritable: false },
               { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
               { pubkey: poolPk, isSigner: false, isWritable: true },
@@ -283,7 +295,8 @@ export async function handleSolanaOrcaTool(name: string, args: Record<string, un
           // WSOL unwrap: close WSOL ATA to get native SOL back
           if (outputIsSOL) {
             const wsolAccount = aToB ? ownerAtaB : ownerAtaA;
-            tx.add(createCloseAccountInstruction(wsolAccount, wallet.publicKey, wallet.publicKey));
+            const wsolProgram = aToB ? tokenProgramB : tokenProgramA;
+            tx.add(createCloseAccountInstruction(wsolAccount, wallet.publicKey, wallet.publicKey, [], wsolProgram));
           }
 
           tx.feePayer = wallet.publicKey;
