@@ -19,6 +19,8 @@ import { nadoTools, handleNadoTool } from './tools/nado.js';
 import { znsTools, handleZnsTool } from './tools/zns.js';
 import { identityTools, handleIdentityTool } from './tools/identity.js';
 import { dailyGmTools, handleDailyGmTool } from './tools/dailygm.js';
+import { solanaSentryTools, handleSolanaSentryTool } from './tools/solana_sentry.js';
+import { solanaOrcaTools, handleSolanaOrcaTool } from './tools/solana_orca.js';
 
 // ── All Tools ──────────────────────────────────────────────────────────
 const allTools = [
@@ -33,6 +35,8 @@ const allTools = [
   ...znsTools,
   ...identityTools,
   ...dailyGmTools,
+  ...solanaSentryTools,
+  ...solanaOrcaTools,
 ];
 
 // ── Route tool calls ───────────────────────────────────────────────────
@@ -47,13 +51,15 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
   if (name.startsWith('nado_'))     return handleNadoTool(name, args);
   if (name.startsWith('zns_'))      return handleZnsTool(name, args);
   if (name.startsWith('identity_')) return handleIdentityTool(name, args);
-  if (name.startsWith('dailygm_'))  return handleDailyGmTool(name, args);
+  if (name.startsWith('dailygm_'))       return handleDailyGmTool(name, args);
+  if (name.startsWith('solana_sentry_')) return handleSolanaSentryTool(name, args);
+  if (name.startsWith('solana_orca_'))   return handleSolanaOrcaTool(name, args);
   throw new Error(`Unknown tool: ${name}`);
 }
 
 // ── Server Setup ───────────────────────────────────────────────────────
 const server = new Server(
-  { name: 'moltiverse-mcp', version: '1.10.2' },
+  { name: 'moltiverse-mcp', version: '1.11.0' },
   { capabilities: { tools: {} } },
 );
 
@@ -81,7 +87,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`moltiverse-mcp v1.10.2 — ${allTools.length} tools registered`);
+  console.error(`moltiverse-mcp v1.11.0 — ${allTools.length} tools registered`);
 }
 
 main().catch((err) => {

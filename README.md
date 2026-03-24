@@ -1,6 +1,6 @@
 # moltiverse-mcp
 
-A unified [Model Context Protocol](https://modelcontextprotocol.io) server that gives AI agents full access to the Moltiverse ecosystem on [Ink](https://inkonchain.com) — Tsunami V3 DEX, Sentry Agent Launch Factory, Tydro lending, NADO perps, Citadel LP Locker, ZNS .ink domain names, ERC-8004 agent identity, DailyGM, on-chain analytics via Goldsky subgraph, cross-chain bridging/swaps via Relay Protocol, and CEX trading via [Kraken CLI](https://github.com/krakenfx/kraken-cli) (134 commands).
+A unified [Model Context Protocol](https://modelcontextprotocol.io) server that gives AI agents full access to the Moltiverse ecosystem across [Ink](https://inkonchain.com) and [Solana](https://solana.com) — Sentry Launch Factory (EVM + SVM), Orca Whirlpool DEX, Tsunami V3 DEX, Tydro lending, NADO perps, Citadel LP Locker, ZNS .ink domain names, ERC-8004 agent identity, DailyGM, on-chain analytics via Goldsky subgraph, cross-chain bridging/swaps via Relay Protocol, and CEX trading via [Kraken CLI](https://github.com/krakenfx/kraken-cli) (134 commands).
 
 ## Quick Start
 
@@ -90,6 +90,9 @@ Add to your `claude_desktop_config.json`:
 | `MOLTING_API_KEY` | Optional | Bearer token from MOLTING registration. Used for token indexing after `sentry_launch`. |
 | `SENTRY_API_BASE` | Optional | MOLTING API base URL. Defaults to the public endpoint. |
 
+| `SOL_PRIVATE_KEY` | Optional | Solana private key (base58 string or JSON byte array). Required for `solana_orca_swap`. |
+| `SOLANA_RPC_URL` | Optional | Custom Solana RPC endpoint. Defaults to `https://api.mainnet-beta.solana.com`. |
+
 Read-only tools work without any environment variables.
 
 ### Kraken CLI (optional)
@@ -103,7 +106,25 @@ Read-only tools work without any environment variables.
 
 Public market data and paper trading work without credentials. Install the CLI from [github.com/krakenfx/kraken-cli](https://github.com/krakenfx/kraken-cli).
 
-## Tools (77 on-chain + 134 via Kraken CLI)
+## Tools (85 on-chain + 134 via Kraken CLI)
+
+### Solana — Sentry Launch Factory (5 tools)
+
+| Tool | Type | Description |
+|---|---|---|
+| `solana_sentry_agent_launch` | Write | Deploy a token on Solana via the Sentry Launch Factory API. Requires 8004 agent identity. API handles metadata upload, all PDA derivation, ALT creation, and Orca CLMM pool setup. |
+| `solana_sentry_submit` | Write | Submit a signed agent launch transaction to the network |
+| `solana_sentry_lookup` | Read | Look up a factory-deployed token by mint address — returns creator, pool, timestamps, agent flag |
+| `solana_sentry_list` | Read | List all tokens deployed through the factory. Filter by creator or agent-only. |
+| `solana_sentry_stats` | Read | Factory stats: total launches, admin, treasury, buyback config |
+
+### Solana — Orca Whirlpool DEX (3 tools)
+
+| Tool | Type | Description |
+|---|---|---|
+| `solana_orca_pool_info` | Read | Get Orca Whirlpool state for a token pair: price, liquidity, tick, fee rate |
+| `solana_orca_quote` | Read | Estimate swap output for a given input amount on an Orca pool |
+| `solana_orca_swap` | Write | Execute a direct swap on an Orca Whirlpool (requires `SOL_PRIVATE_KEY`) |
 
 ### Tsunami V3 DEX (13 tools)
 
@@ -268,6 +289,16 @@ kraken mcp -s all                    # full access
 kraken mcp -s all --allow-dangerous  # autonomous mode
 ```
 
+## Program & Contract Addresses
+
+### Solana (Mainnet)
+
+| Program / Account | Address |
+|---|---|
+| Sentry Launch Factory | `FVrGHhqAB8wk63nnT7npNRFwBgjsRWUvCpuaapuSTKX1` |
+| Orca Whirlpool Program | `whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc` |
+| Orca Whirlpools Config | `2LecshUwdy9xi7meFgHtFJQNSKk4KdTrcpvaB56dP2NQ` |
+
 ## Contract Addresses (Ink — Chain ID 57073)
 
 ### Tsunami V3
@@ -375,6 +406,8 @@ kraken mcp -s all --allow-dangerous  # autonomous mode
 
 Step-by-step playbooks for common agent workflows — multi-step sequences, parameter gotchas, and cross-protocol flows.
 
+- [Solana Sentry Skills](docs/skills/solana-sentry-skills.md) — Deploying tokens on Solana, querying the factory registry
+- [Solana Orca Skills](docs/skills/solana-orca-skills.md) — Swapping on Orca Whirlpools, dev buys
 - [Tsunami Skills](docs/skills/tsunami-skills.md) — Swapping, LP management, buying NAMI
 - [Sentry Skills](docs/skills/sentry-skills.md) — Launching tokens
 - [Citadel Skills](docs/skills/citadel-skills.md) — Locking LP, collecting and routing fees
