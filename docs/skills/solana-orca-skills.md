@@ -21,3 +21,19 @@ Use `So11111111111111111111111111111111111111112` as `input_mint` to swap SOL fo
 After deploying a token via `solana_sentry_agent_launch`, use the returned `whirlpool` address to buy your own token:
 
 1. Call `solana_orca_swap` with `pool` = the whirlpool from launch, `input_mint` = WSOL mint, `amount` = desired SOL in lamports
+
+---
+
+## Jupiter (Alternative Swap Path)
+
+For tokens with established liquidity, [Jupiter](https://jup.ag) is the easiest swap path — it aggregates across all Solana DEXes (including Orca) and handles routing automatically. Two HTTP calls, no PDAs, no account ordering.
+
+Install Jupiter's official agent skills for full API coverage (Ultra Swap, token search, pricing, perps, DCA, lending, and more):
+
+```
+npx skills add jup-ag/agent-skills --skill "integrating-jupiter"
+```
+
+Full reference: https://dev.jup.ag/ai/skills
+
+**Note:** Jupiter needs time to index new pools. For freshly launched tokens (e.g. right after `solana_sentry_agent_launch`), use `solana_orca_swap` to hit the pool directly — Jupiter may not have indexed it yet.
