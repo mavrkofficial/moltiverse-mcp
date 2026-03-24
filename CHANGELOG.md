@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.11.0] — 2026-03-23
+
+### Added
+- **Solana Sentry Launch Factory** — 5 tools: `solana_sentry_agent_launch`, `solana_sentry_submit`, `solana_sentry_lookup`, `solana_sentry_list`, `solana_sentry_stats`. Agents can deploy tokens on Solana via the Sentry API with 8004 identity verification, query the on-chain factory registry, and list all factory-deployed tokens.
+- **Solana Orca Whirlpool** — 3 tools: `solana_orca_pool_info`, `solana_orca_quote`, `solana_orca_swap`. Direct Orca CLMM pool interaction for reading pool state, estimating swap output, and executing swaps.
+- `SOLANA_RPC_URL` and `SOL_PRIVATE_KEY` environment variables for Solana connectivity.
+- Solana keychain support: `SOL_PRIVATE_KEY` accepts base58 or JSON byte array format.
+- `@solana/web3.js`, `@solana/spl-token`, and `bs58` dependencies.
+
 ## [1.10.2] — 2026-03-19
 
 ### Added

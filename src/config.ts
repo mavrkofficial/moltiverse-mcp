@@ -31,6 +31,15 @@ export const CONTRACTS = {
   DailyGM: '0x9F500d075118272B3564ac6Ef2c70a9067Fd2d3F',
 } as const;
 
+// ── Solana ────────────────────────────────────────────────────────────
+export const SOLANA_CONFIG = {
+  rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+  SentryLaunchFactory: 'FVrGHhqAB8wk63nnT7npNRFwBgjsRWUvCpuaapuSTKX1',
+  OrcaWhirlpoolProgram: 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc',
+  OrcaWhirlpoolsConfig: '2LecshUwdy9xi7meFgHtFJQNSKk4KdTrcpvaB56dP2NQ',
+  sentryApiBase: process.env.SENTRY_API_BASE || 'https://web-production-7d3e.up.railway.app',
+} as const;
+
 // ── Subgraph ──────────────────────────────────────────────────────────
 export const SUBGRAPH_URL = 'https://api.goldsky.com/api/public/project_cmm7vh5xwsa8m01qmdr7w7u62/subgraphs/tsunami-v3/1.0.0/gn';
 

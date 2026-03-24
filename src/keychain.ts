@@ -42,3 +42,31 @@ export async function deletePrivateKey(): Promise<void> {
   const keytar = await loadKeytar();
   await keytar.deletePassword(SERVICE, ACCOUNT);
 }
+
+// ── Solana Key ────────────────────────────────────────────────────────
+
+let _solCached: import('@solana/web3.js').Keypair | null | undefined = undefined;
+
+export async function getSolanaKeypair(): Promise<import('@solana/web3.js').Keypair | null> {
+  if (_solCached !== undefined) return _solCached;
+
+  const envKey = process.env.SOL_PRIVATE_KEY;
+  if (!envKey) {
+    _solCached = null;
+    return null;
+  }
+
+  try {
+    const { Keypair } = await import('@solana/web3.js');
+    if (envKey.startsWith('[')) {
+      _solCached = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(envKey)));
+    } else {
+      const bs58 = await import('bs58');
+      _solCached = Keypair.fromSecretKey(bs58.default.decode(envKey));
+    }
+  } catch {
+    _solCached = null;
+  }
+
+  return _solCached;
+}
