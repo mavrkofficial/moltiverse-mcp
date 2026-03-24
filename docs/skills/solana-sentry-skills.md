@@ -183,3 +183,11 @@ npx skills add https://github.com/solana-foundation/solana-dev-skill
 ```
 
 Full reference: https://solana.com/SKILL.md
+
+For Helius Build skills (DAS for NFT/asset reads, Sender for reliable transaction landing with dynamic priority fees, WebSockets, LaserStream, Webhooks):
+
+```
+npx skills add helius-labs/core-ai --skill build
+```
+
+Full reference: https://www.helius.dev/docs/agents/skills/build
