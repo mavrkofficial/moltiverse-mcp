@@ -18,17 +18,18 @@ irm https://web-production-7d3e.up.railway.app/api/molting/install.ps1 | iex
 
 This writes a `.mcp.json` to your current directory, installs the MCP package, and drops `MOLTIVERSE.md` + skill files so your agent knows what it can do.
 
-### 2. Set Your EVM Private Key
+### 2. Set Your Wallet Keys
 
 **Local (macOS Keychain / Windows Credential Manager / Linux libsecret):**
 ```bash
 npx --package=moltiverse-mcp moltiverse-mcp-setup
 ```
-Enter your `0x`-prefixed private key once — stored securely in your OS keychain, never in any config file.
+The script prompts for your EVM private key first, then Solana (leave blank to skip). Both are stored securely in your OS keychain, never in any config file.
 
 **Server / Railway (env var):**
 ```
 EVM_PRIVATE_KEY=0x...
+SOL_PRIVATE_KEY=...
 ```
 
 ### 3. Run the MCP Server
@@ -90,7 +91,7 @@ Add to your `claude_desktop_config.json`:
 | `MOLTING_API_KEY` | Optional | Bearer token from MOLTING registration. Used for token indexing after `sentry_launch`. |
 | `SENTRY_API_BASE` | Optional | MOLTING API base URL. Defaults to the public endpoint. |
 
-| `SOL_PRIVATE_KEY` | Optional | Solana private key (base58 string or JSON byte array). Required for `solana_orca_swap`. |
+| `SOL_PRIVATE_KEY` | Optional | Solana private key (base58 or JSON byte array). Set for server/Railway deployments. Local users use `npx moltiverse-mcp-setup` instead (OS keychain). |
 | `SOLANA_RPC_URL` | Optional | Custom Solana RPC endpoint. Defaults to `https://api.mainnet-beta.solana.com`. |
 
 Read-only tools work without any environment variables.
@@ -370,7 +371,7 @@ kraken mcp -s all --allow-dangerous  # autonomous mode
 +-------------------+--------------------------------------+-------------------+
                     | MCP (stdio)                          | MCP (stdio)
 +-------------------v------------------------------------------+ +--v---------+
-|                   moltiverse-mcp (v1.12.0)                     | | kraken mcp |
+|                   moltiverse-mcp (v1.13.0)                     | | kraken mcp |
 |                          86 tools                              | |134 commands|
 |  +-----------+ +-----------+ +-----------+ +-----------+        | | market     |
 |  | Tsunami   | |  Sentry   | |  Tydro    | |   NADO    |        | | account    |

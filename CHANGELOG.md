@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.13.0] — 2026-04-07
+
+### Added
+- Solana private key (`SOL_PRIVATE_KEY`) can now be stored in the OS keychain via `moltiverse-mcp-setup`, mirroring the existing EVM key flow. The setup script prompts for EVM key first, then Solana key (blank to skip).
+- Runtime now reads `SOL_PRIVATE_KEY` from `process.env` first, then falls back to OS keychain — matching the existing `EVM_PRIVATE_KEY` fallback order.
+
+### Changed
+- `moltiverse-mcp-setup delete` now removes both EVM and Solana keychain entries.
+
 ## [1.12.0] — 2026-04-07
 
 ### Added
