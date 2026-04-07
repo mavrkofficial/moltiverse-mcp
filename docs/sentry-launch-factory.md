@@ -1,18 +1,25 @@
-# Sentry Agent Launch Factory
+# Sentry Launch Factory
 
 ## Overview
 
-The Sentry Agent Launch Factory is a token launchpad contract deployed on Ink that enables AI agents and users to deploy a fully tradable ERC-20 token with a single transaction. It is designed to be the most capital-efficient way to create a low-cap token with immediate on-chain liquidity — no seed capital required, no manual pool setup, no multi-step process.
+The Sentry Launch Factory is a unified token launchpad contract deployed on Ink that enables anyone — or specifically AI agents holding an ERC-8004 identity — to deploy a fully tradable ERC-20 token in a single transaction. It is the most capital-efficient way to create a low-cap token with immediate on-chain liquidity: no seed capital required, no manual pool setup, no multi-step process.
 
-When a creator launches a token through Sentry, the factory atomically:
+The factory exposes two launch paths:
 
-1. Deploys a new ERC-20 token contract
-2. Creates a Tsunami V3 concentrated liquidity pool
-3. Mints a single-sided LP position at a 1% fee tier
-4. Permanently holds the LP NFT in the factory (no external locker required)
-5. Emits indexable events for frontends and analytics
+| Function | Access | Description |
+|---|---|---|
+| `launch(name, symbol, baseToken)` | **Permissionless** | Anyone can launch a token |
+| `launchAgent(name, symbol, baseToken)` | **Agent-gated** | Requires the caller to hold an ERC-8004 identity NFT |
 
-The entire launch happens in one transaction. The resulting token is immediately tradable on Tsunami V3 with locked liquidity that can never be removed.
+Both paths perform the same atomic sequence:
+
+1. Deploy a new ERC-20 token contract (1 billion fixed supply, ownership renounced)
+2. Create a Tsunami V3 concentrated liquidity pool at the 1% fee tier
+3. Mint a single-sided LP position (100% token supply, no base token required)
+4. Lock the LP NFT in Citadel (permanent lock — no unlock mechanism)
+5. Emit indexable events for frontends and analytics
+
+The entire launch happens in one transaction. The resulting token is immediately tradable on Tsunami V3 with permanently locked liquidity.
 
 ---
 
@@ -35,6 +42,30 @@ Unlike constant-product AMMs, Tsunami V3's concentrated liquidity means the laun
 - **Deeper liquidity at relevant prices** — capital is not wasted at unreachable prices
 - **Better execution for traders** — less slippage per dollar of liquidity
 - **Higher fee generation for the LP** — more trades occur in the active range
+
+---
+
+## Launch Paths
+
+### Permissionless Launch (`launch`)
+
+Open to any wallet. No prerequisites.
+
+```
+sentry_launch(name="My Token", symbol="MTK", baseToken=<WETH_address>)
+```
+
+### Agent Launch (`launchAgent`)
+
+Requires the caller to hold an ERC-8004 identity NFT. Register first via `identity_register()`.
+
+```
+sentry_launch_agent(name="My Token", symbol="MTK", baseToken=<WETH_address>)
+```
+
+The factory checks the `identityRegistry` to verify the caller owns at least one identity NFT. If not, the transaction reverts.
+
+Agent-launched positions are flagged via `isAgentPosition[tokenId] = true`, which determines fee routing (see below).
 
 ---
 
@@ -70,7 +101,9 @@ The factory calls `createAndInitializePoolIfNecessary` on the Tsunami V3 Positio
 
 ### Step 4: LP Position Minting
 
-The factory mints a single-sided concentrated liquidity position. The recipient is always `address(this)` — the factory permanently holds the LP NFT. There is no transfer or unlock function.
+The factory mints a single-sided concentrated liquidity position. The LP NFT is then locked in Citadel — the factory's integrated LP locker. There is no unlock mechanism.
+
+If the Citadel lock fails, the factory emits a `CitadelLockFailed` event and the LP NFT remains in the factory. An admin can retry the lock via `retryLockInCitadel(tokenId)`.
 
 ### Step 5: Creator Tracking
 
@@ -79,35 +112,37 @@ The factory records every launch:
 - `nftCreators[tokenId] → creator address`
 - `creatorNFTs[creator] → tokenId[]`
 - `tokenIdToToken[tokenId] → token address`
+- `isAgentPosition[tokenId] → bool` (true only for `launchAgent` calls)
 
 ---
 
-## Fee Collection
+## Fee Collection & Routing
 
-All trading fees from Sentry-launched pools accrue to the factory-held LP positions. **Only the factory owner can collect fees.**
+All trading fees from Sentry-launched pools accrue to the locked LP positions. **Only the factory owner can collect fees.**
 
-When fees are collected, the factory automatically routes them:
+When fees are collected, the factory routes them based on the launch type:
 
-- **WETH fees** → swapped to **MOLTING** token via Tsunami V3 (`exactInputSingle`, 1% fee tier) — creating buy pressure on MOLTING with every fee harvest
-- **Meme token fees** → sent directly to the treasury
-
-If the MOLTING swap fails (e.g. insufficient liquidity), the WETH falls back to treasury. This ensures fee collection never reverts.
+| Fee Type | Regular Launch (`launch`) | Agent Launch (`launchAgent`) |
+|---|---|---|
+| **Meme token fees** | Sent to treasury | Sent to treasury |
+| **WETH fees** | Sent to `feesWalletRegular` | Sent to `feesWalletAgent` |
 
 ```
-collectFees(tokenId)              — collect fees from one LP position, auto-buy MOLTING with WETH side
+collectFees(tokenId)              — collect fees from one LP position
 collectMultipleFees(tokenIds[])   — batch collect from multiple positions
 ```
 
-The treasury address is updatable by the factory owner via `updateTreasury(newTreasury)`.
+The treasury and fee wallet addresses are updatable by the factory owner:
+- `updateTreasury(newTreasury)`
+- `setFeeWallets(regularWallet, agentWallet)`
 
-### Fee Routing Constants (V3)
+### Current Fee Wallets
 
-| Constant | Value |
+| Wallet | Address |
 |---|---|
-| `WETH9` | `0x4200000000000000000000000000000000000006` |
-| `MOLTING` | `0x63d49DF9B08da5dAA254c66BDacA0A481Ec5d89f` |
-| `SWAP_ROUTER` | `0x4415F2360bfD9B1bF55500Cb28fA41dF95CB2d2b` |
-| `MOLTING_POOL_FEE` | `10000` (1%) |
+| `feesWalletRegular` | `0xEf687f8c52229754a5780B5c5d746CD048B81E57` |
+| `feesWalletAgent` | `0xe8360F88D529283bB6E759D6Aa74e3A25aae26Ca` |
+| `treasury` | `0xcaAfCf8E55f3B5e3D5F7957987db232f08d2367c` |
 
 ---
 
@@ -118,7 +153,7 @@ The factory is deployed behind a `TransparentUpgradeableProxy` with a `ProxyAdmi
 - Logic can be upgraded without changing the contract address
 - All state (creator mappings, NFT custody, configuration) is preserved across upgrades
 - `initialize()` replaces the constructor and can only be called once
-- `__gap[49]` reserves storage slots for future state variables
+- `__gap` reserves storage slots for future state variables
 
 ---
 
@@ -149,9 +184,11 @@ getSupportedBaseTokens()                — list all registered base tokens
 | `TokenDeployed(token, name, symbol, creator, tokenId)` | New token launched |
 | `PoolInitialized(pool, token)` | Tsunami V3 pool created |
 | `LiquidityMinted(tokenId, pool, token)` | LP position minted |
-| `LPLocked(tokenId, pool, token)` | LP NFT permanently held by factory |
+| `LPLocked(tokenId, pool, token)` | LP NFT locked in Citadel |
 | `FeesCollected(tokenId, amount0, amount1)` | Trading fees harvested |
-| `MoltingBought(tokenId, wethIn, moltingOut)` | WETH fees swapped to MOLTING (V3) |
+| `CitadelLockFailed(tokenId, reason)` | Citadel lock attempt failed (LP stays in factory) |
+| `FeeWalletsUpdated(oldRegular, newRegular, oldAgent, newAgent)` | Fee routing wallets changed |
+| `IdentityRegistryUpdated(oldRegistry, newRegistry)` | Identity registry reference changed |
 | `BaseTokenAdded(baseToken, manager)` | New base token registered |
 | `BaseTokenRemoved(baseToken)` | Base token unregistered |
 | `PoolManagerUpdated(baseToken, oldManager, newManager)` | Pool manager changed |
@@ -171,6 +208,10 @@ getSupportedBaseTokens()                — list all registered base tokens
 | `getTokenByNFT(tokenId)` | Token contract address for an LP NFT |
 | `getTotalTokensDeployed()` | Total tokens ever launched |
 | `getTrustedForwarder()` | Current Gelato ERC-2771 forwarder address |
+| `isAgentPosition(tokenId)` | Whether a position was created via `launchAgent` |
+| `feesWalletRegular()` | WETH fee destination for regular launches |
+| `feesWalletAgent()` | WETH fee destination for agent launches |
+| `identityRegistry()` | ERC-8004 identity registry address |
 
 ---
 
@@ -178,8 +219,8 @@ getSupportedBaseTokens()                — list all registered base tokens
 
 | Contract | Address |
 |---|---|
-| **SentryAgentLaunchFactory (Proxy)** | `0x733733E8eAbB94832847AbF0E0EeD6031c3EB2E4` |
-| **Implementation (V3)** | `0x4b48bEAbAdb7e414A225Aeed7ACB8a9209B4800f` |
-| **ProxyAdmin** | `0x52D15931D109DcfAbe8C21b0E279dC6b3Dea7002` |
+| **SentryLaunchFactory (Proxy)** | `0xDc37e11B68052d1539fa23386eE58Ac444bf5BE1` |
+| **Implementation** | `0x6f269786695Fcd8cc684ebF37604dd2fB1797FcC` |
+| **ProxyAdmin** | `0x6dc3fc5C00e8c807207EBAD35706b6b2520cA757` |
 
 Deployed on Ink (Chain ID 57073).

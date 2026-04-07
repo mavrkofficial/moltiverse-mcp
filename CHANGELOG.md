@@ -15,6 +15,12 @@ All notable changes to this project will be documented in this file.
 - `identity_register` and `identity_check_registered` descriptions now reference `sentry_launch_agent()` instead of `sentry_launch()`.
 - ABI renamed from `SentryAgentLaunchFactory` to `SentryLaunchFactory` with new contract functions and events.
 
+### Docs
+- **README.md** — updated Sentry section to 7 tools, added `sentry_launch_agent` row, updated contract address and architecture diagram, updated ERC-8004 section to reference `sentry_launch_agent`.
+- **docs/sentry-launch-factory.md** — rewrote from scratch for the unified contract (replaced old `sentry-agent-launch-factory.md`). Documents both launch paths, new fee routing model, Citadel integration, updated events and view functions, and new contract addresses.
+- **docs/skills/sentry-skills.md** — rewrote to cover both permissionless and agent-gated launch workflows.
+- **docs/skills/identity-skills.md** — updated ERC-8004 identity flow to reference `sentry_launch_agent()` instead of `sentry_launch()`.
+
 ## [1.11.3] — 2026-03-24
 
 ### Fixed
