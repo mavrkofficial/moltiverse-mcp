@@ -41,7 +41,9 @@ export const SOLANA_CONFIG = {
 } as const;
 
 // ── Subgraph ──────────────────────────────────────────────────────────
-export const SUBGRAPH_URL = 'https://api.goldsky.com/api/public/project_cmm7vh5xwsa8m01qmdr7w7u62/subgraphs/tsunami-v3/1.0.0/gn';
+// Override via TSUNAMI_SUBGRAPH_URL env var when Goldsky republishes the subgraph.
+export const SUBGRAPH_URL = process.env.TSUNAMI_SUBGRAPH_URL
+  ?? 'https://api.goldsky.com/api/public/project_cmm7vh5xwsa8m01qmdr7w7u62/subgraphs/tsunami-v3/2.2.0/gn';
 
 // ── Constants ─────────────────────────────────────────────────────────
 export const DEFAULT_SLIPPAGE_BPS = 50;

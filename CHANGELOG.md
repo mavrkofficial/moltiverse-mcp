@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.14.0] — 2026-04-07
+
+### Added
+- **`weth_wrap` and `weth_unwrap` tools** — convert between native ETH and WETH on Ink. Unblocks Tydro `supply` and NADO `deposit` flows for users who hold native ETH instead of WETH. `weth_unwrap` accepts `"max"` to unwrap the full balance.
+- **`solana_token_balance` tool** — fetch SPL token balances for any Solana wallet. Sums across both Token Program and Token-2022 accounts. Defaults the owner to the configured Solana wallet.
+- **Solana ERC-8004 identity tool suite** — `solana_identity_register`, `solana_identity_check_registered`, `solana_identity_get_agent`, `solana_identity_get_owner_agents`, `solana_identity_set_agent_uri`, and `solana_identity_total_registered`. Wraps the QuantuLabs [`8004-solana`](https://github.com/QuantuLabs/8004-solana-ts) SDK on mainnet-beta. Required before `solana_sentry_agent_launch` (the Ink-side `identity_*` tools register on Ink only — Solana has its own registry).
+- **`TSUNAMI_SUBGRAPH_URL` env var** — override the Goldsky subgraph endpoint without needing a new release. Useful when Goldsky republishes the subgraph at a new project/version path.
+- New dependency: `8004-solana@^0.8.3`.
+
+### Changed
+- **`solana_sentry_submit` now auto-signs unsigned transactions** using the configured Solana key (env var or OS keychain). Previously, callers had to deserialize → sign externally → re-serialize before submission, requiring custom helper scripts. The flow is now: `solana_sentry_agent_launch` → `solana_sentry_submit` (auto-signed). Pre-signed transactions are passed through unchanged.
+- **NADO module now uses the shared `getAccount()` / `getWalletClient()` helpers** from `src/client.ts` instead of reading `EVM_PRIVATE_KEY` directly. NADO write tools (`nado_deposit`, `nado_withdraw`, `nado_place_order`, `nado_cancel_order`, `nado_cancel_all`) and read tools (`nado_get_account`, `nado_get_positions`, `nado_get_open_orders`, `nado_get_trade_history`) now work with keys stored in the OS keychain — closing the previous asymmetry where every other EVM module supported keychain but NADO did not.
+- **`nado_get_account` (and the other NADO read tools)** now default `address` to the configured wallet when omitted, instead of throwing.
+- **Tsunami subgraph URL bumped** from `tsunami-v3/1.0.0/gn` to `tsunami-v3/2.2.0/gn` (the previous URL was 404'ing on every `subgraph_*` tool because Goldsky republished the subgraph at a new version path).
+- **`sentry_launch`, `sentry_launch_agent`, and `solana_sentry_agent_launch` tool descriptions clarified**: the single-sided LP NFT is held permanently inside the factory contract itself, not in a separate locker contract. There is no withdraw or remove-liquidity path — only fee collection via `sentry_collect_fees`. This corrects misleading wording that suggested LPs were locked in the Citadel locker.
+
+### Fixed
+- **`tsunami_swap_exact_input` / `tsunami_swap_exact_output` reverting with `STF` (SafeTransferFrom failed)** when selling non-WETH tokens immediately after a fresh approval. Root cause: `viem`'s `waitForTransactionReceipt` returns receipts for reverted transactions without throwing, so a silently-failed approve would let the broken swap proceed. The shared `ensureApproval` helper now (a) verifies `receipt.status === 'success'` after the approve and throws clearly on revert, and (b) re-reads the allowance with retry/backoff after confirmation to defend against eventually-consistent RPC providers serving stale state immediately after a confirmed write.
+
 ## [1.13.0] — 2026-04-07
 
 ### Added

@@ -1,5 +1,6 @@
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import { SOLANA_CONFIG } from '../config.js';
+import { getSolanaKeypair } from '../keychain.js';
 import { createHash } from 'crypto';
 
 const PROGRAM_ID = new PublicKey(SOLANA_CONFIG.SentryLaunchFactory);
@@ -18,7 +19,7 @@ const LAUNCH_RECORD_DISCRIMINATOR = createHash('sha256')
 export const solanaSentryTools = [
   {
     name: 'solana_sentry_agent_launch',
-    description: 'Launch a token on Solana via the Sentry Launch Factory API. Requires 8004 agent identity. The API handles metadata upload, PDA derivation, ALT creation, and Orca pool setup. Returns a pre-built transaction for the agent to sign.',
+    description: 'Launch a token on Solana via the Sentry Launch Factory API. Requires a Solana 8004 agent identity NFT. The API handles metadata upload, PDA derivation, ALT creation, and Orca CLMM pool setup. The single-sided LP position is held permanently inside the factory program itself (no external locker, no withdraw, no remove-liquidity — only fee collection). Returns a pre-built versioned transaction; pair with solana_sentry_submit which auto-signs from the configured Solana key (env or OS keychain) before submitting.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -37,11 +38,11 @@ export const solanaSentryTools = [
   },
   {
     name: 'solana_sentry_submit',
-    description: 'Submit a signed Solana agent launch transaction. After signing the transaction from solana_sentry_agent_launch, submit it here.',
+    description: 'Submit the launch transaction returned by solana_sentry_agent_launch. Auto-signs unsigned transactions using the configured Solana key (SOL_PRIVATE_KEY env or OS keychain via moltiverse-mcp-setup). Pre-signed transactions are passed through unchanged.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        transaction: { type: 'string', description: 'Base64-encoded signed versioned transaction' },
+        transaction: { type: 'string', description: 'Base64-encoded versioned transaction (signed or unsigned). Unsigned transactions are auto-signed before submission.' },
         token_mint: { type: 'string', description: 'Token mint address from the agent_launch response' },
       },
       required: ['transaction', 'token_mint'],
@@ -159,11 +160,34 @@ export async function handleSolanaSentryTool(name: string, args: Record<string, 
     }
 
     case 'solana_sentry_submit': {
+      // Auto-sign unsigned transactions using the configured Solana key.
+      // Pre-signed txs are passed through unchanged.
+      let txBase64 = args.transaction as string;
+      try {
+        const txBytes = Buffer.from(txBase64, 'base64');
+        const vtx = VersionedTransaction.deserialize(txBytes);
+        // A signature slot is "empty" when every byte is 0. If any required slot
+        // is still empty, we need to sign locally before submitting.
+        const needsSigning = vtx.signatures.some(sig => sig.every(b => b === 0));
+        if (needsSigning) {
+          const signer = await getSolanaKeypair();
+          if (!signer) {
+            throw new Error('Transaction is unsigned and no Solana key is configured. Set SOL_PRIVATE_KEY env var or run `npx moltiverse-mcp-setup` to store one in the OS keychain.');
+          }
+          vtx.sign([signer]);
+          txBase64 = Buffer.from(vtx.serialize()).toString('base64');
+        }
+      } catch (e: any) {
+        // If deserialization fails, fall through and let the API surface the error.
+        // We only re-throw the explicit "no key" error from above.
+        if (e?.message?.includes('no Solana key is configured')) throw e;
+      }
+
       const res = await fetch(`${API_BASE}/api/agent-launch/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          transaction: args.transaction,
+          transaction: txBase64,
           token_mint: args.token_mint,
         }),
       });

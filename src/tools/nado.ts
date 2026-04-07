@@ -5,7 +5,8 @@
 import { type Address, encodePacked, keccak256, toHex, hexToBytes, encodeAbiParameters, parseAbiParameters, maxUint256 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { signTypedData } from 'viem/accounts';
-import { publicClient, getWalletClient } from '../client.js';
+import { publicClient, getAccount, getWalletClient } from '../client.js';
+import { getPrivateKey } from '../keychain.js';
 
 // ── Constants ────────────────────────────────────────────────────────
 const ARCHIVE  = 'https://archive.prod.nado.xyz/v1';
@@ -511,10 +512,8 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
     }
 
     case 'nado_get_account': {
-      const pk = process.env.EVM_PRIVATE_KEY;
-      const address = (args.address as string) ??
-        (pk ? privateKeyToAccount(pk as `0x${string}`).address : null);
-      if (!address) throw new Error('address or EVM_PRIVATE_KEY required');
+      const address = (args.address as string) ?? await getAccount().catch(() => null);
+      if (!address) throw new Error('No address provided and no wallet configured. Pass `address` or set EVM_PRIVATE_KEY env / OS keychain key via `npx moltiverse-mcp-setup`.');
       const subName = (args.subaccountName as string) || 'default';
       const subaccount = encodeSubaccount(address as string, subName);
       const ts = Math.floor(Date.now() / 1000);
@@ -561,10 +560,8 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
     }
 
     case 'nado_get_positions': {
-      const pk = process.env.EVM_PRIVATE_KEY;
-      const address = (args.address as string) ??
-        (pk ? privateKeyToAccount(pk as `0x${string}`).address : null);
-      if (!address) throw new Error('address or EVM_PRIVATE_KEY required');
+      const address = (args.address as string) ?? await getAccount().catch(() => null);
+      if (!address) throw new Error('No address provided and no wallet configured. Pass `address` or set EVM_PRIVATE_KEY env / OS keychain key.');
       const subName = (args.subaccountName as string) || 'default';
       const subaccount = encodeSubaccount(address as string, subName);
       const ts = Math.floor(Date.now() / 1000);
@@ -604,10 +601,8 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
     }
 
     case 'nado_get_open_orders': {
-      const pk = process.env.EVM_PRIVATE_KEY;
-      const address = (args.address as string) ??
-        (pk ? privateKeyToAccount(pk as `0x${string}`).address : null);
-      if (!address) throw new Error('address or EVM_PRIVATE_KEY required');
+      const address = (args.address as string) ?? await getAccount().catch(() => null);
+      if (!address) throw new Error('No address provided and no wallet configured. Pass `address` or set EVM_PRIVATE_KEY env / OS keychain key.');
       const subName = (args.subaccountName as string) || 'default';
       const subaccount = encodeSubaccount(address as string, subName);
       const markets = args.markets as string[] | undefined;
@@ -630,10 +625,8 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
     }
 
     case 'nado_get_trade_history': {
-      const pk = process.env.EVM_PRIVATE_KEY;
-      const address = (args.address as string) ??
-        (pk ? privateKeyToAccount(pk as `0x${string}`).address : null);
-      if (!address) throw new Error('address or EVM_PRIVATE_KEY required');
+      const address = (args.address as string) ?? await getAccount().catch(() => null);
+      if (!address) throw new Error('No address provided and no wallet configured. Pass `address` or set EVM_PRIVATE_KEY env / OS keychain key.');
       const subName = (args.subaccountName as string) || 'default';
       const subaccount = encodeSubaccount(address as string, subName);
       const limit = Math.min((args.limit as number) || 20, 100);
@@ -656,8 +649,8 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
     }
 
     case 'nado_place_order': {
-      const pk = process.env.EVM_PRIVATE_KEY;
-      if (!pk) throw new Error('EVM_PRIVATE_KEY required for order placement');
+      const pk = await getPrivateKey();
+      if (!pk) throw new Error('No EVM private key found for order placement. Set EVM_PRIVATE_KEY env or run `npx moltiverse-mcp-setup` to store one in the OS keychain.');
       const { productId } = resolveMarket(args.market as string);
       const subName = (args.subaccountName as string) || 'default';
       const account = privateKeyToAccount(pk as `0x${string}`);
@@ -699,8 +692,8 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
     }
 
     case 'nado_cancel_order': {
-      const pk = process.env.EVM_PRIVATE_KEY;
-      if (!pk) throw new Error('EVM_PRIVATE_KEY required');
+      const pk = await getPrivateKey();
+      if (!pk) throw new Error('No EVM private key found. Set EVM_PRIVATE_KEY env or run `npx moltiverse-mcp-setup`.');
       const { productId } = resolveMarket(args.market as string);
       const subName = (args.subaccountName as string) || 'default';
       const account = privateKeyToAccount(pk as `0x${string}`);
@@ -743,8 +736,8 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
     }
 
     case 'nado_cancel_all': {
-      const pk = process.env.EVM_PRIVATE_KEY;
-      if (!pk) throw new Error('EVM_PRIVATE_KEY required');
+      const pk = await getPrivateKey();
+      if (!pk) throw new Error('No EVM private key found. Set EVM_PRIVATE_KEY env or run `npx moltiverse-mcp-setup`.');
       const { productId } = resolveMarket(args.market as string);
       const subName = (args.subaccountName as string) || 'default';
       const account = privateKeyToAccount(pk as `0x${string}`);
@@ -783,9 +776,8 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
     }
 
     case 'nado_deposit': {
-      const pk = process.env.EVM_PRIVATE_KEY;
-      if (!pk) throw new Error('EVM_PRIVATE_KEY required');
-      const account = privateKeyToAccount(pk as `0x${string}`);
+      const wc = await getWalletClient();
+      const account = wc.account;
       const subName = (args.subaccountName as string) || 'default';
       const tokenArg = args.token as string;
       const amount = args.amount as number;
@@ -802,7 +794,6 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
 
       const amountRaw = BigInt(Math.round(amount * 10 ** tokenInfo.decimals));
       const subaccountNameBytes12 = encodeSubaccountName(subName);
-      const wc = await getWalletClient();
 
       // Approve
       const allowance = await publicClient.readContract({
@@ -832,9 +823,8 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
       // NADO withdrawals use slow-mode on-chain transactions (not gateway)
       // Docs: https://docs.nado.xyz/developer-resources/api/withdrawing-on-chain
       // Requires 1 USDT0 approval for the slow-mode fee
-      const pk = process.env.EVM_PRIVATE_KEY;
-      if (!pk) throw new Error('EVM_PRIVATE_KEY required');
-      const account = privateKeyToAccount(pk as `0x${string}`);
+      const wc = await getWalletClient();
+      const account = wc.account;
       const subName = (args.subaccountName as string) || 'default';
       const subaccount = encodeSubaccount(account.address, subName);
       const tokenArg = args.token as string;
@@ -850,7 +840,6 @@ export async function handleNadoTool(name: string, args: Record<string, unknown>
       if (productId === undefined) throw new Error(`Cannot resolve productId for ${tokenArg}`);
 
       const amountRaw = BigInt(Math.round(amount * 10 ** tokenInfo.decimals));
-      const wc = await getWalletClient();
 
       // Approve 1 USDT0 for slow-mode fee
       const usdt0 = SPOT_TOKENS[0];

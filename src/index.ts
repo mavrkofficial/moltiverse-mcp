@@ -21,6 +21,8 @@ import { identityTools, handleIdentityTool } from './tools/identity.js';
 import { dailyGmTools, handleDailyGmTool } from './tools/dailygm.js';
 import { solanaSentryTools, handleSolanaSentryTool } from './tools/solana_sentry.js';
 import { solanaOrcaTools, handleSolanaOrcaTool } from './tools/solana_orca.js';
+import { solanaTokenTools, handleSolanaTokenTool } from './tools/solana_token.js';
+import { solanaIdentityTools, handleSolanaIdentityTool } from './tools/solana_identity.js';
 
 // ── All Tools ──────────────────────────────────────────────────────────
 const allTools = [
@@ -37,6 +39,8 @@ const allTools = [
   ...dailyGmTools,
   ...solanaSentryTools,
   ...solanaOrcaTools,
+  ...solanaTokenTools,
+  ...solanaIdentityTools,
 ];
 
 // ── Route tool calls ───────────────────────────────────────────────────
@@ -51,15 +55,17 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
   if (name.startsWith('nado_'))     return handleNadoTool(name, args);
   if (name.startsWith('zns_'))      return handleZnsTool(name, args);
   if (name.startsWith('identity_')) return handleIdentityTool(name, args);
-  if (name.startsWith('dailygm_'))       return handleDailyGmTool(name, args);
-  if (name.startsWith('solana_sentry_')) return handleSolanaSentryTool(name, args);
-  if (name.startsWith('solana_orca_'))   return handleSolanaOrcaTool(name, args);
+  if (name.startsWith('dailygm_'))         return handleDailyGmTool(name, args);
+  if (name.startsWith('solana_sentry_'))   return handleSolanaSentryTool(name, args);
+  if (name.startsWith('solana_orca_'))     return handleSolanaOrcaTool(name, args);
+  if (name.startsWith('solana_token_'))    return handleSolanaTokenTool(name, args);
+  if (name.startsWith('solana_identity_')) return handleSolanaIdentityTool(name, args);
   throw new Error(`Unknown tool: ${name}`);
 }
 
 // ── Server Setup ───────────────────────────────────────────────────────
 const server = new Server(
-  { name: 'moltiverse-mcp', version: '1.13.0' },
+  { name: 'moltiverse-mcp', version: '1.14.0' },
   { capabilities: { tools: {} } },
 );
 
@@ -87,7 +93,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`moltiverse-mcp v1.13.0 — ${allTools.length} tools registered`);
+  console.error(`moltiverse-mcp v1.14.0 — ${allTools.length} tools registered`);
 }
 
 main().catch((err) => {
