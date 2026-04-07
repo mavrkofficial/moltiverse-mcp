@@ -20,7 +20,7 @@ Call `solana_orca_swap` with:
 - `amount` = SOL amount in **lamports** (1 SOL = 1,000,000,000 lamports, so 0.75 SOL = `750000000`)
 - `slippage_bps` = optional, default 100 (1%)
 
-Requires `SOL_PRIVATE_KEY` env var.
+Requires `SOL_PRIVATE_KEY` (env var or OS keychain via `moltiverse-mcp-setup`).
 
 To **sell** the token back to SOL, use the token's mint address as `input_mint` instead.
 
