@@ -56,7 +56,7 @@ export const solanaOrcaTools = [
   },
   {
     name: 'solana_orca_swap',
-    description: 'Execute a swap on an Orca Whirlpool on Solana. Requires SOL_PRIVATE_KEY.',
+    description: 'Execute a direct swap on a single Orca Whirlpool on Solana. PREFER `solana_jupiter_swap` for almost all use cases — it routes across every Solana DEX and handles tick array initialization, ATAs, and SOL wrap/unwrap automatically. This direct path is fragile against newly-launched tokens with single-sided LP (returns TickArraySequenceInvalidIndex when the swap walks beyond pre-initialized tick arrays). Requires SOL_PRIVATE_KEY.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -316,9 +316,12 @@ export async function handleSolanaOrcaTool(name: string, args: Record<string, un
             direction: aToB ? 'A→B' : 'B→A',
           };
         } catch (e: any) {
-          const msg = `${e?.message || e}`;
+          const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e?.cause ?? e));
           const retryable = msg.includes('TickArraySequenceInvalidIndex') || msg.includes('0x1796') || msg.includes('3012');
-          if (!retryable || attempt === maxAttempts) throw e;
+          if (!retryable || attempt === maxAttempts) {
+            // Re-throw with a real Error that has a string message (not [object Object])
+            throw new Error(msg);
+          }
           // Wait briefly then retry with different tick alignment
           await new Promise(r => setTimeout(r, 500));
         }

@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.14.1] — 2026-04-07
+
+### Fixed
+- **`weth_wrap` and `weth_unwrap` returning "Unknown tool"** despite appearing in the tool listing. Root cause: the tools were registered in `erc20Tools` but the router in `src/index.ts` only matched `name.startsWith('erc20_')`, so calls to `weth_wrap` / `weth_unwrap` fell through to the unknown-tool error. Added `if (name.startsWith('weth_')) return handleErc20Tool(...)` next to the erc20 line. **This was a critical v1.14.0 ship bug — every Tydro/NADO native-ETH workflow was broken without these helpers.**
+- **`tydro_get_reserve_data` returning `Infinity%` for any utilized reserve and `0.0000%` for idle reserves.** The `rayToAPY` helper treated Aave's RAY-encoded **annual** rate (APR) as a per-second rate, then exponentiated it 31,536,000 times, giving `(1 + APR)^secondsPerYear` ≈ infinity for any nonzero APR. Replaced with the correct APR→APY conversion: `(1 + APR/secondsPerYear)^secondsPerYear - 1`.
+- **`solana_orca_swap` returning `"[object Object]"`** in error responses on certain failure paths. The catch block was passing the raw error object to `JSON.stringify` instead of extracting `.message` first. Now produces a real string message with the underlying revert reason or program error.
+
+### Added
+- **`solana_jupiter_quote` and `solana_jupiter_swap` tools** — execute Solana swaps via the Jupiter v6 aggregator instead of building Whirlpool `swap_v2` instructions by hand. Routes across every Solana DEX (Orca, Raydium, Meteora, Phoenix, etc.) and handles tick array initialization, ATA creation, and SOL wrap/unwrap internally. **This is the canonical Solana swap path going forward.** `solana_orca_swap` is still available but its description now points users at Jupiter and warns about the fragility of the direct path against newly-launched single-sided LP pools (where it returns `TickArraySequenceInvalidIndex` when the swap walks beyond pre-initialized tick arrays).
+- **`relay_execute` tool** — actually execute a same-chain swap on Ink via Relay Protocol routing, not just fetch a quote. Useful when Tsunami pools lack liquidity (e.g. ETH→USDT0 where the Tsunami pool has ~$1.50 TVL). Internally fetches a Relay quote, then sends every approval+deposit transaction returned in `quote.steps` from the configured EVM wallet. Returns all tx hashes plus the Relay request ID for status tracking. Supports Ink-origin swaps only (the wallet only signs Ink txs); for cross-chain bridges from other origins, use `relay_get_quote` and submit the origin tx with the wallet on that chain.
+
+### Changed
+- `solana_orca_swap` description now warns "PREFER `solana_jupiter_swap` for almost all use cases" and explains why direct Whirlpool routing is fragile.
+
+### Notes
+- Internal: introduced a real handler-invocation smoke test alongside the existing "tools registered" smoke test, after the v1.14.0 weth_wrap routing bug shipped because the build only verified that the tool appeared in the listing — never that calls actually reached the handler.
+
 ## [1.14.0] — 2026-04-07
 
 ### Added

@@ -32,8 +32,14 @@ function resolveAsset(asset: string): { address: Address; decimals: number } {
 }
 
 function rayToAPY(ray: bigint): string {
-  const ratePerSecond = Number(ray) / 1e27;
-  return (((1 + ratePerSecond) ** 31536000 - 1) * 100).toFixed(4) + '%';
+  // Aave V3 returns rates in RAY (1e27), where the RAY value represents the
+  // ANNUAL rate (APR), not per-second. e.g. 5e25 RAY = 5% APR.
+  // Convert APR -> APY assuming per-second compounding (Aave's convention).
+  const SECONDS_PER_YEAR = 31536000;
+  const apr = Number(ray) / 1e27;
+  if (!Number.isFinite(apr) || apr === 0) return '0.0000%';
+  const apy = Math.pow(1 + apr / SECONDS_PER_YEAR, SECONDS_PER_YEAR) - 1;
+  return (apy * 100).toFixed(4) + '%';
 }
 
 function formatUSD(val: bigint): string {
