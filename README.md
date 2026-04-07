@@ -106,7 +106,7 @@ Read-only tools work without any environment variables.
 
 Public market data and paper trading work without credentials. Install the CLI from [github.com/krakenfx/kraken-cli](https://github.com/krakenfx/kraken-cli).
 
-## Tools (85 on-chain + 134 via Kraken CLI)
+## Tools (86 on-chain + 134 via Kraken CLI)
 
 ### Solana — Sentry Launch Factory (5 tools)
 
@@ -144,25 +144,26 @@ Public market data and paper trading work without credentials. Install the CLI f
 | `tsunami_get_position` | Read | Get full position details by token ID |
 | `tsunami_get_user_positions` | Read | List all LP positions for an address |
 
-### Sentry Agent Launch Factory (6 tools)
+### Sentry Launch Factory (7 tools)
 
 | Tool | Type | Description |
 |---|---|---|
-| `sentry_launch` | Write | Deploy a token, create Tsunami V3 pool, and permanently lock single-sided LP in the factory |
+| `sentry_launch` | Write | Permissionless token launch — deploys token, creates Tsunami V3 pool, locks single-sided LP. Open to anyone. |
+| `sentry_launch_agent` | Write | Agent-only token launch — same as `sentry_launch` but requires an ERC-8004 identity NFT (register via `identity_register` first) |
 | `sentry_get_creator_nfts` | Read | Get all LP NFT IDs for a creator |
 | `sentry_get_token_by_nft` | Read | Get token address from LP NFT ID |
 | `sentry_get_supported_base_tokens` | Read | List supported base tokens (e.g. WETH) |
 | `sentry_get_total_deployed` | Read | Total tokens launched through Sentry |
-| `sentry_collect_fees` | Write | Harvest trading fees from LP positions — owner only, sent to treasury |
+| `sentry_collect_fees` | Write | Collect trading fees from LP positions — owner only. Token fees go to treasury; WETH fees route to stakeholder yield wallets based on launch type. |
 
 ### ERC-8004 Agent Identity (6 tools)
 
-[ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) is the Ethereum standard for on-chain AI agent identity (co-authored by MetaMask, Ethereum Foundation, Google, Coinbase). On Ink, the IdentityRegistry is **required before launching tokens via `sentry_launch()`**.
+[ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) is the Ethereum standard for on-chain AI agent identity (co-authored by MetaMask, Ethereum Foundation, Google, Coinbase). On Ink, the IdentityRegistry is **required before launching tokens via `sentry_launch_agent()`**.
 
 | Tool | Type | Description |
 |---|---|---|
-| `identity_register` | Write | Register an ERC-8004 agent identity — mints an identity NFT. Required before `sentry_launch()`. |
-| `identity_check_registered` | Read | Check if a wallet holds an identity NFT (prerequisite for token launches) |
+| `identity_register` | Write | Register an ERC-8004 agent identity — mints an identity NFT. Required before `sentry_launch_agent()`. |
+| `identity_check_registered` | Read | Check if a wallet holds an identity NFT (prerequisite for agent token launches) |
 | `identity_get_agent` | Read | Get agentURI and decoded metadata for an agent ID |
 | `identity_set_agent_uri` | Write | Update identity metadata (owner only) |
 | `identity_get_owner_agents` | Read | List all agent identity token IDs for a wallet |
@@ -314,7 +315,7 @@ kraken mcp -s all --allow-dangerous  # autonomous mode
 
 | Contract | Address |
 |---|---|
-| SentryAgentLaunchFactory (Proxy) | `0x733733E8eAbB94832847AbF0E0EeD6031c3EB2E4` |
+| SentryLaunchFactory (Proxy) | `0xDc37e11B68052d1539fa23386eE58Ac444bf5BE1` |
 | Citadel LP Locker | `0x111474f3062E9B8B7B9d568675c5bb1262d6F862` |
 
 ### Tydro (Borrow/Lending Markets)
@@ -369,11 +370,11 @@ kraken mcp -s all --allow-dangerous  # autonomous mode
 +-------------------+--------------------------------------+-------------------+
                     | MCP (stdio)                          | MCP (stdio)
 +-------------------v------------------------------------------+ +--v---------+
-|                   moltiverse-mcp (v1.11.0)                     | | kraken mcp |
-|                          85 tools                              | |134 commands|
+|                   moltiverse-mcp (v1.12.0)                     | | kraken mcp |
+|                          86 tools                              | |134 commands|
 |  +-----------+ +-----------+ +-----------+ +-----------+        | | market     |
 |  | Tsunami   | |  Sentry   | |  Tydro    | |   NADO    |        | | account    |
-|  | 13 tools  | |  6 tools  | |  7 tools  | | 11 tools  |        | | trade      |
+|  | 13 tools  | |  7 tools  | |  7 tools  | | 11 tools  |        | | trade      |
 |  +-----------+ +-----------+ +-----------+ +-----------+        | | funding    |
 |  | Citadel   | | Subgraph  | |   ERC20   | |   Relay   |        | | earn       |
 |  |  9 tools  | |  6 tools  | |  4 tools  | |  6 tools  |        | | futures    |
@@ -397,7 +398,7 @@ kraken mcp -s all --allow-dangerous  # autonomous mode
 ## Documentation
 
 - [Tsunami V3 DEX](docs/tsunami-v3-dex.md)
-- [Sentry Agent Launch Factory](docs/sentry-agent-launch-factory.md)
+- [Sentry Launch Factory](docs/sentry-launch-factory.md)
 - [Citadel LP Locker](docs/citadel-lp-locker.md)
 - [Relay Protocol](docs/relay-protocol.md)
 - [Tydro Lending Protocol](docs/tydro-lending.md)
