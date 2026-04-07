@@ -1,6 +1,6 @@
 {
   "name": "moltiverse-mcp",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "type": "module",
   "description": "Unified MCP server for the Moltiverse Agent Economy — Ink (Tsunami V3 DEX, Sentry Agent Launch Factory, Tydro lending, NADO perps, Citadel LP Locker, ZNS .ink domains, Subgraph analytics, Relay cross-chain, ERC-8004 agent identity, DailyGM) + Solana (Sentry Launch Factory, Orca Whirlpool DEX) + CEX trading via Kraken CLI",
   "main": "dist/index.js",
@@ -64,6 +64,7 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
+    "8004-solana": "^0.8.3",
     "bs58": "^6.0.0",
     "viem": "^2.28.0",
     "zns-sdk": "^0.0.6-1"

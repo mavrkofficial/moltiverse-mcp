@@ -8,7 +8,7 @@ const FACTORY = CONTRACTS.SentryLaunchFactory as Address;
 export const sentryTools = [
   {
     name: 'sentry_launch',
-    description: 'Permissionless token launch via Sentry. Deploys token, creates Tsunami V3 pool, and locks single-sided LP. Open to anyone.',
+    description: 'Permissionless token launch via Sentry. Deploys an ERC20 token, creates a Tsunami V3 pool (1% fee tier), and mints a single-sided LP NFT held permanently inside the factory contract itself (no external locker, no withdraw, no remove-liquidity — only fee collection via sentry_collect_fees). Open to anyone.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -21,7 +21,7 @@ export const sentryTools = [
   },
   {
     name: 'sentry_launch_agent',
-    description: 'Agent-only token launch via Sentry. Same as sentry_launch but requires the caller to hold an ERC-8004 identity NFT (register via identity_register first). Deploys token, creates Tsunami V3 pool, and locks single-sided LP.',
+    description: 'Agent-only token launch via Sentry. Gated by an ERC-8004 identity NFT on Ink (register via identity_register first). Deploys an ERC20 token, creates a Tsunami V3 pool (1% fee tier), and mints a single-sided LP NFT held permanently inside the factory contract itself (no external locker, no withdraw, no remove-liquidity — only fee collection via sentry_collect_fees).',
     inputSchema: {
       type: 'object' as const,
       properties: {

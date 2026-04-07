@@ -20,17 +20,45 @@ function deadline(): bigint {
 
 async function ensureApproval(token: Address, spender: Address, amount: bigint) {
   const account = await getAccount();
-  const allowance = await publicClient.readContract({
+
+  // Initial allowance check
+  const initial = await publicClient.readContract({
     address: token, abi: ERC20ABI, functionName: 'allowance', args: [account, spender],
   }) as bigint;
-  if (allowance < amount) {
-    const data = encodeFunctionData({
-      abi: ERC20ABI, functionName: 'approve',
-      args: [spender, BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')],
-    });
-    const { hash } = await sendTx({ to: token, data });
-    await publicClient.waitForTransactionReceipt({ hash });
+  if (initial >= amount) return;
+
+  // Send max approve
+  const data = encodeFunctionData({
+    abi: ERC20ABI, functionName: 'approve',
+    args: [spender, BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')],
+  });
+  const { hash } = await sendTx({ to: token, data });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+
+  // Reject silent failures: viem's waitForTransactionReceipt does NOT throw on reverted txs.
+  if (receipt.status !== 'success') {
+    throw new Error(
+      `Approval reverted on-chain (token=${token} spender=${spender} tx=${hash}). ` +
+      `The router/spender will not be able to pull tokens. Aborting before swap to avoid wasted gas.`
+    );
   }
+
+  // Belt-and-braces: re-read allowance and verify it covers the requested amount.
+  // Some load-balanced RPC providers serve eventually-consistent reads, so a single
+  // read immediately after a confirmed approve can still return stale state. Poll
+  // briefly until the new allowance is visible to the read node.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const post = await publicClient.readContract({
+      address: token, abi: ERC20ABI, functionName: 'allowance', args: [account, spender],
+    }) as bigint;
+    if (post >= amount) return;
+    await new Promise(r => setTimeout(r, 600));
+  }
+
+  throw new Error(
+    `Approval transaction confirmed (tx=${hash}) but allowance still reads as insufficient ` +
+    `after polling. The RPC node may be lagging. Retry the swap in a few seconds.`
+  );
 }
 
 export const tsunamiTools = [
