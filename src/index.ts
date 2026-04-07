@@ -21,6 +21,7 @@ import { identityTools, handleIdentityTool } from './tools/identity.js';
 import { dailyGmTools, handleDailyGmTool } from './tools/dailygm.js';
 import { solanaSentryTools, handleSolanaSentryTool } from './tools/solana_sentry.js';
 import { solanaOrcaTools, handleSolanaOrcaTool } from './tools/solana_orca.js';
+import { solanaJupiterTools, handleSolanaJupiterTool } from './tools/solana_jupiter.js';
 import { solanaTokenTools, handleSolanaTokenTool } from './tools/solana_token.js';
 import { solanaIdentityTools, handleSolanaIdentityTool } from './tools/solana_identity.js';
 
@@ -39,6 +40,7 @@ const allTools = [
   ...dailyGmTools,
   ...solanaSentryTools,
   ...solanaOrcaTools,
+  ...solanaJupiterTools,
   ...solanaTokenTools,
   ...solanaIdentityTools,
 ];
@@ -46,6 +48,7 @@ const allTools = [
 // ── Route tool calls ───────────────────────────────────────────────────
 async function handleToolCall(name: string, args: Record<string, unknown>): Promise<unknown> {
   if (name.startsWith('erc20_'))    return handleErc20Tool(name, args);
+  if (name.startsWith('weth_'))     return handleErc20Tool(name, args);  // weth_wrap / weth_unwrap live in erc20.ts
   if (name.startsWith('subgraph_')) return handleSubgraphTool(name, args);
   if (name.startsWith('citadel_'))  return handleCitadelTool(name, args);
   if (name.startsWith('sentry_'))   return handleSentryTool(name, args);
@@ -58,6 +61,7 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
   if (name.startsWith('dailygm_'))         return handleDailyGmTool(name, args);
   if (name.startsWith('solana_sentry_'))   return handleSolanaSentryTool(name, args);
   if (name.startsWith('solana_orca_'))     return handleSolanaOrcaTool(name, args);
+  if (name.startsWith('solana_jupiter_'))  return handleSolanaJupiterTool(name, args);
   if (name.startsWith('solana_token_'))    return handleSolanaTokenTool(name, args);
   if (name.startsWith('solana_identity_')) return handleSolanaIdentityTool(name, args);
   throw new Error(`Unknown tool: ${name}`);
@@ -65,7 +69,7 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
 
 // ── Server Setup ───────────────────────────────────────────────────────
 const server = new Server(
-  { name: 'moltiverse-mcp', version: '1.14.0' },
+  { name: 'moltiverse-mcp', version: '1.14.1' },
   { capabilities: { tools: {} } },
 );
 
@@ -93,7 +97,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`moltiverse-mcp v1.14.0 — ${allTools.length} tools registered`);
+  console.error(`moltiverse-mcp v1.14.1 — ${allTools.length} tools registered`);
 }
 
 main().catch((err) => {
