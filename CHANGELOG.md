@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.12.0] — 2026-04-07
+
+### Added
+- **`sentry_launch_agent`** — new tool for agent-only token launches. Calls the `launchAgent()` function on the unified SentryLaunchFactory, which requires the caller to hold an ERC-8004 identity NFT.
+
+### Changed
+- **Unified SentryLaunchFactory** — replaced the old `SentryAgentLaunchFactory` contract (0x733733...) with the new upgradeable proxy at `0xDc37e11B68052d1539fa23386eE58Ac444bf5BE1`. One contract now handles both permissionless launches (`launch`) and agent launches (`launchAgent`).
+- **Fee routing updated** — WETH-side LP trading fees now route to stakeholder yield wallets (separate wallets for regular vs agent launches) instead of auto-swapping to MOLTING. Token-side fees still go to treasury.
+- `sentry_launch` description updated to clarify it is permissionless and open to anyone.
+- `sentry_collect_fees` description updated to reflect the new fee routing model.
+- `identity_register` and `identity_check_registered` descriptions now reference `sentry_launch_agent()` instead of `sentry_launch()`.
+- ABI renamed from `SentryAgentLaunchFactory` to `SentryLaunchFactory` with new contract functions and events.
+
 ## [1.11.3] — 2026-03-24
 
 ### Fixed

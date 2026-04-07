@@ -10,7 +10,7 @@ const IDENTITY_REGISTRY = CONTRACTS.IdentityRegistry as Address;
 export const identityTools = [
   {
     name: 'identity_register',
-    description: 'Register an ERC-8004 agent identity on the IdentityRegistry. Required before launching tokens via SentryAgentLaunchFactory. Pass a name and description; the agentURI is built automatically as a base64 data URI.',
+    description: 'Register an ERC-8004 agent identity on the IdentityRegistry. Required before launching tokens via sentry_launch_agent(). Pass a name and description; the agentURI is built automatically as a base64 data URI.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -58,7 +58,7 @@ export const identityTools = [
   },
   {
     name: 'identity_check_registered',
-    description: 'Check if a wallet holds an ERC-8004 agent identity NFT. Returns true if registered (required for sentry_launch).',
+    description: 'Check if a wallet holds an ERC-8004 agent identity NFT. Returns true if registered (required for sentry_launch_agent).',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -167,7 +167,7 @@ export async function handleIdentityTool(name: string, args: Record<string, unkn
         agentURI,
         registry: IDENTITY_REGISTRY,
         message: agentId
-          ? `Agent identity #${agentId} registered. You can now launch tokens via sentry_launch().`
+          ? `Agent identity #${agentId} registered. You can now launch tokens via sentry_launch_agent().`
           : 'Registration submitted. Check transaction for agentId.',
       };
     }
@@ -230,8 +230,8 @@ export async function handleIdentityTool(name: string, args: Record<string, unkn
         isRegistered,
         identityCount: (balance as bigint).toString(),
         message: isRegistered
-          ? `Wallet holds ${balance} identity NFT(s). Ready to launch tokens via sentry_launch().`
-          : 'Not registered. Call identity_register() first — required before sentry_launch().',
+          ? `Wallet holds ${balance} identity NFT(s). Ready to launch tokens via sentry_launch_agent().`
+          : 'Not registered. Call identity_register() first — required before sentry_launch_agent().',
       };
     }
 
