@@ -1,11 +1,17 @@
-export const SentryAgentLaunchFactoryABI = [
-  // ── Launch ──
+export const SentryLaunchFactoryABI = [
+  // ── Launch (permissionless) ──
   {
     type: "function", name: "launch", stateMutability: "nonpayable",
     inputs: [{ name: "_name", type: "string" }, { name: "_symbol", type: "string" }, { name: "baseToken", type: "address" }],
     outputs: [{ name: "tokenAddress", type: "address" }, { name: "tokenId", type: "uint256" }],
   },
-  // ── Fee Collection (owner only; WETH fees → MOLTING buy, meme fees → treasury) ──
+  // ── Launch Agent (requires ERC-8004 identity NFT) ──
+  {
+    type: "function", name: "launchAgent", stateMutability: "nonpayable",
+    inputs: [{ name: "_name", type: "string" }, { name: "_symbol", type: "string" }, { name: "baseToken", type: "address" }],
+    outputs: [{ name: "tokenAddress", type: "address" }, { name: "tokenId", type: "uint256" }],
+  },
+  // ── Fee Collection (owner only) ──
   {
     type: "function", name: "collectFees", stateMutability: "nonpayable",
     inputs: [{ name: "tokenId", type: "uint256" }], outputs: [],
@@ -48,6 +54,22 @@ export const SentryAgentLaunchFactoryABI = [
     inputs: [], outputs: [{ name: "", type: "address" }],
   },
   {
+    type: "function", name: "isAgentPosition", stateMutability: "view",
+    inputs: [{ name: "tokenId", type: "uint256" }], outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    type: "function", name: "feesWalletRegular", stateMutability: "view",
+    inputs: [], outputs: [{ name: "", type: "address" }],
+  },
+  {
+    type: "function", name: "feesWalletAgent", stateMutability: "view",
+    inputs: [], outputs: [{ name: "", type: "address" }],
+  },
+  {
+    type: "function", name: "identityRegistry", stateMutability: "view",
+    inputs: [], outputs: [{ name: "", type: "address" }],
+  },
+  {
     type: "function", name: "treasury", stateMutability: "view",
     inputs: [], outputs: [{ name: "", type: "address" }],
   },
@@ -62,6 +84,10 @@ export const SentryAgentLaunchFactoryABI = [
   {
     type: "function", name: "totalTokensDeployed", stateMutability: "view",
     inputs: [], outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function", name: "citadel", stateMutability: "view",
+    inputs: [], outputs: [{ name: "", type: "address" }],
   },
   // ── Events ──
   {
@@ -125,12 +151,40 @@ export const SentryAgentLaunchFactoryABI = [
     ],
   },
   {
-    type: "event", name: "MoltingBought", anonymous: false,
+    type: "event", name: "CitadelUpdated", anonymous: false,
+    inputs: [
+      { name: "oldCitadel", type: "address", indexed: false },
+      { name: "newCitadel", type: "address", indexed: false },
+    ],
+  },
+  {
+    type: "event", name: "CitadelLockFailed", anonymous: false,
     inputs: [
       { name: "tokenId", type: "uint256", indexed: true },
-      { name: "wethIn", type: "uint256", indexed: false },
-      { name: "moltingOut", type: "uint256", indexed: false },
+      { name: "reason", type: "bytes", indexed: false },
+    ],
+  },
+  {
+    type: "event", name: "IdentityRegistryUpdated", anonymous: false,
+    inputs: [
+      { name: "oldRegistry", type: "address", indexed: false },
+      { name: "newRegistry", type: "address", indexed: false },
+    ],
+  },
+  {
+    type: "event", name: "FeeWalletsUpdated", anonymous: false,
+    inputs: [
+      { name: "oldRegularWallet", type: "address", indexed: false },
+      { name: "newRegularWallet", type: "address", indexed: false },
+      { name: "oldAgentWallet", type: "address", indexed: false },
+      { name: "newAgentWallet", type: "address", indexed: false },
+    ],
+  },
+  {
+    type: "event", name: "PoolInitialized", anonymous: false,
+    inputs: [
+      { name: "pool", type: "address", indexed: true },
+      { name: "token", type: "address", indexed: true },
     ],
   },
 ] as const;
-
