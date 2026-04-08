@@ -1,8 +1,29 @@
 import { type Address, type Hash } from 'viem';
-import { getAccount, sendTx, publicClient } from '../client.js';
+import { privateKeyToAccount } from 'viem/accounts';
+import {
+  Connection,
+  PublicKey,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+  AddressLookupTableAccount,
+} from '@solana/web3.js';
+import {
+  getAccount,
+  sendTxOnChain,
+  getPublicClientForChain,
+} from '../client.js';
+import { getPrivateKey, getSolanaKeypair } from '../keychain.js';
+import { SOLANA_CONFIG } from '../config.js';
 
 const RELAY_API = 'https://api.relay.link';
 const INK_CHAIN_ID = 57073;
+const SOLANA_CHAIN_ID = 792703809; // Relay's internal Solana mainnet chain id
+const ECLIPSE_CHAIN_ID = 9286185;
+const SOON_CHAIN_ID = 9286186;
+const SVM_ORIGIN_CHAINS = new Set<number>([SOLANA_CHAIN_ID, ECLIPSE_CHAIN_ID, SOON_CHAIN_ID]);
+// Non-EVM, non-SVM origins we can't sign for at all
+const NON_EVM_SVM_CHAINS = new Set<number>([1337, 3586256, 8253038, 728126428]); // hyperliquid, lighter, bitcoin, tron
 
 async function relayFetch(path: string, method: 'GET' | 'POST' = 'GET', body?: unknown) {
   const url = method === 'GET' && body
@@ -106,15 +127,17 @@ export const relayTools = [
   },
   {
     name: 'relay_execute',
-    description: 'Execute a same-chain swap on Ink via Relay Protocol routing. Useful when Tsunami pools lack liquidity (e.g. ETH→USDT0). Internally fetches a Relay quote, then sends every approval+deposit transaction returned in the quote.steps from the configured EVM wallet. Returns all tx hashes plus the Relay request ID for status tracking. NOTE: only supports Ink-origin swaps (originChainId=57073) since we sign with the configured Ink wallet. For cross-chain bridges originating elsewhere, use relay_get_quote and submit the origin tx yourself with the wallet on that chain.',
+    description: 'Execute a swap or cross-chain bridge via Relay Protocol routing. Fetches a Relay quote, then signs and submits every transaction in the returned quote.steps using the configured wallet for the origin chain. Supported origins: any of the 60+ EVM chains in viem/chains (Ink, Base, Arbitrum, Optimism, Ethereum mainnet, Polygon, BNB, Avalanche, Linea, Scroll, zkSync, Blast, Berachain, Mantle, etc.) signed by the configured EVM key, plus Solana mainnet (792703809) signed by the configured Solana keypair. Destination can be any of the 70+ chains Relay supports. Useful for: (a) same-chain swaps where local DEX liquidity is thin, (b) cross-chain bridges in any direction between Solana and any EVM chain, (c) cross-chain EVM↔EVM bridges using a single private key. Per-chain RPC URLs default to viem\'s baked-in defaults but can be overridden via the EVM_RPC_OVERRIDES env var (JSON map from chainId to RPC URL). Cross-chain bridges originating from non-EVM/non-Solana chains (Bitcoin, Tron, Hyperliquid, Lighter) are not supported.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        originCurrency: { type: 'string', description: 'Token address on Ink to swap FROM (use 0x0000000000000000000000000000000000000000 for native ETH)' },
-        destinationCurrency: { type: 'string', description: 'Token address on Ink to swap TO' },
-        amount: { type: 'string', description: 'Input amount in wei' },
+        originChainId: { type: 'number', description: 'Origin chain ID. Defaults to 57073 (Ink). Any EVM chain in viem/chains works (8453 Base, 42161 Arbitrum, 1 Ethereum, etc.) plus 792703809 (Solana mainnet).' },
+        destinationChainId: { type: 'number', description: 'Destination chain ID. Defaults to same as originChainId (for single-chain swaps). Can be any Relay-supported chain.' },
+        originCurrency: { type: 'string', description: 'Token address on origin chain. For EVM use 0x0000000000000000000000000000000000000000 for native gas token. For Solana use 11111111111111111111111111111111 for native SOL.' },
+        destinationCurrency: { type: 'string', description: 'Token address on destination chain' },
+        amount: { type: 'string', description: 'Input amount in smallest unit (wei for EVM, lamports for Solana)' },
         slippageBps: { type: 'number', description: 'Slippage tolerance in basis points (default: 100 = 1%). Forwarded to Relay.' },
-        recipient: { type: 'string', description: 'Recipient address (defaults to your wallet)' },
+        recipient: { type: 'string', description: 'Recipient address on the destination chain. Defaults: SVM destinations get the configured Solana pubkey; EVM destinations get the configured EVM address (same across all EVM chains).' },
       },
       required: ['originCurrency', 'destinationCurrency', 'amount'],
     },
@@ -195,15 +218,72 @@ export async function handleRelayTool(name: string, args: Record<string, unknown
     }
 
     case 'relay_execute': {
-      // Same-chain Ink swap via Relay aggregator routing.
-      const user = await getAccount();
-      const recipient = (args.recipient as string) ?? user;
+      // Swap or cross-chain bridge via Relay. Branches on origin VM type:
+      //   EVM (any viem-supported chain)  -> sign with configured EVM key, broadcast via per-chain client
+      //   Solana mainnet (792703809)      -> sign with configured Solana keypair
+      //   Eclipse / SOON / Bitcoin / Tron / Hyperliquid / Lighter -> reject (no wallet support yet)
+      const originChainId = (args.originChainId as number) ?? INK_CHAIN_ID;
+      const destinationChainId = (args.destinationChainId as number) ?? originChainId;
+
+      // Determine the origin VM and resolve the "user" (origin-side signer address)
+      const isSvmOrigin = SVM_ORIGIN_CHAINS.has(originChainId);
+      const isUnsupportedOrigin = NON_EVM_SVM_CHAINS.has(originChainId);
+
+      let user: string;
+      if (isUnsupportedOrigin) {
+        throw new Error(`Origin chain ${originChainId} uses a non-EVM/non-SVM VM and is not supported by relay_execute.`);
+      } else if (isSvmOrigin) {
+        if (originChainId !== SOLANA_CHAIN_ID) {
+          throw new Error(`SVM origin chain ${originChainId} (Eclipse/SOON) is not yet supported. Only Solana mainnet (792703809) has an RPC configured. Use relay_get_quote and sign externally.`);
+        }
+        const signer = await getSolanaKeypair();
+        if (!signer) {
+          throw new Error('Solana origin requires a configured Solana key. Set SOL_PRIVATE_KEY env or run `npx moltiverse-mcp-setup`.');
+        }
+        user = signer.publicKey.toBase58();
+      } else {
+        // Any EVM chain — derive address from local EVM key
+        const pk = await getPrivateKey();
+        if (!pk) {
+          throw new Error('EVM origin requires a configured EVM private key. Set EVM_PRIVATE_KEY env or run `npx moltiverse-mcp-setup`.');
+        }
+        user = privateKeyToAccount(pk as `0x${string}`).address;
+      }
+
+      // Default recipient picker. Relay supports 74 chains across multiple VMs.
+      // The caller CAN always override with an explicit `recipient`, but when omitted
+      // we try to pick a sensible default based on the destination VM type:
+      //   - SVM destinations (Solana, Eclipse, SOON) -> Solana pubkey
+      //   - EVM destinations (anything else) -> Ink EVM wallet (same address across all EVM chains)
+      // For non-EVM/non-SVM destinations (Bitcoin, Tron, etc.) we require an explicit recipient.
+      const SVM_DESTINATIONS = new Set([792703809, 9286185, 9286186]); // solana, eclipse, soon
+      const NON_EVM_SVM = new Set([1337, 3586256, 8253038, 728126428]); // hyperliquid, lighter, bitcoin, tron
+
+      let recipient = args.recipient as string | undefined;
+      if (!recipient) {
+        if (SVM_DESTINATIONS.has(destinationChainId)) {
+          const svmSigner = await getSolanaKeypair();
+          if (!svmSigner) {
+            throw new Error(`Destination chain ${destinationChainId} is SVM but no Solana key is configured to derive a default recipient. Pass \`recipient\` explicitly.`);
+          }
+          recipient = svmSigner.publicKey.toBase58();
+        } else if (NON_EVM_SVM.has(destinationChainId)) {
+          throw new Error(`Destination chain ${destinationChainId} uses a non-EVM/non-SVM VM and has no default recipient. Pass \`recipient\` explicitly with an address valid on that chain.`);
+        } else {
+          // Default: EVM destination. Use the Ink EVM wallet address (valid on every EVM chain).
+          try {
+            recipient = await getAccount();
+          } catch {
+            throw new Error(`Cross-chain destination ${destinationChainId} requires an EVM wallet for default recipient, but no EVM key is configured. Pass \`recipient\` explicitly.`);
+          }
+        }
+      }
 
       const quoteBody: Record<string, unknown> = {
         user,
         recipient,
-        originChainId: INK_CHAIN_ID,
-        destinationChainId: INK_CHAIN_ID,
+        originChainId,
+        destinationChainId,
         originCurrency: args.originCurrency,
         destinationCurrency: args.destinationCurrency,
         amount: args.amount,
@@ -214,37 +294,136 @@ export async function handleRelayTool(name: string, args: Record<string, unknown
       }
 
       const quote = await relayFetch('/quote', 'POST', quoteBody) as any;
-
-      // Sanity check the quote shape
       if (!quote?.steps || !Array.isArray(quote.steps)) {
         throw new Error(`Relay quote returned no executable steps: ${JSON.stringify(quote).slice(0, 500)}`);
       }
 
-      // Execute every tx in every step's items list
-      const submittedTxs: Array<{ stepId: string; itemIndex: number; hash: Hash; status: string }> = [];
-      for (const step of quote.steps) {
-        if (!step.items || !Array.isArray(step.items)) continue;
-        for (let i = 0; i < step.items.length; i++) {
-          const item = step.items[i];
-          if (item.status === 'complete') continue;
-          const data = item.data;
-          if (!data || !data.to || !data.data) {
-            throw new Error(`Relay step "${step.id}" item ${i} has no executable data: ${JSON.stringify(item).slice(0, 300)}`);
+      // Executed tx records. Shape differs by VM — unified through a normalized structure.
+      const submittedTxs: Array<{
+        stepId: string;
+        itemIndex: number;
+        chain: 'evm' | 'solana';
+        chainId: number;
+        hash?: string;
+        signature?: string;
+        status: string;
+      }> = [];
+
+      if (!isSvmOrigin) {
+        // ── EVM signing path (any viem-supported chain) ───────────────────
+        // Cache one publicClient per chainId to avoid recreating it for each item.
+        const publicClientCache = new Map<number, ReturnType<typeof getPublicClientForChain>>();
+        for (const step of quote.steps) {
+          if (!step.items || !Array.isArray(step.items)) continue;
+          for (let i = 0; i < step.items.length; i++) {
+            const item = step.items[i];
+            if (item.status === 'complete') continue;
+            const data = item.data;
+            if (!data || !data.to || !data.data) {
+              throw new Error(`Relay step "${step.id}" item ${i} has no executable EVM data: ${JSON.stringify(item).slice(0, 300)}`);
+            }
+            // Each Relay step item carries its own chainId (the step's home chain).
+            // Fall back to the requested origin if not present.
+            const stepChainId = data.chainId !== undefined ? Number(data.chainId) : originChainId;
+            const value = data.value ? BigInt(data.value) : 0n;
+
+            const { hash } = await sendTxOnChain(stepChainId, {
+              to: data.to as Address,
+              data: data.data as `0x${string}`,
+              value,
+            });
+
+            // Wait for receipt on that specific chain
+            let pubClient = publicClientCache.get(stepChainId);
+            if (!pubClient) {
+              pubClient = getPublicClientForChain(stepChainId);
+              publicClientCache.set(stepChainId, pubClient);
+            }
+            const receipt = await pubClient.waitForTransactionReceipt({ hash });
+
+            submittedTxs.push({
+              stepId: step.id,
+              itemIndex: i,
+              chain: 'evm',
+              chainId: stepChainId,
+              hash,
+              status: receipt.status,
+            });
+            if (receipt.status !== 'success') {
+              throw new Error(`Relay step "${step.id}" item ${i} reverted on chain ${stepChainId} (tx=${hash})`);
+            }
           }
-          // Verify chainId matches Ink (defensive — Relay should already know this from the quote)
-          if (data.chainId !== undefined && Number(data.chainId) !== INK_CHAIN_ID) {
-            throw new Error(`Relay step "${step.id}" item ${i} targets chainId ${data.chainId}, but relay_execute only supports Ink (57073). Use relay_get_quote and submit the tx yourself for non-Ink origins.`);
-          }
-          const value = data.value ? BigInt(data.value) : 0n;
-          const { hash } = await sendTx({
-            to: data.to as Address,
-            data: data.data as `0x${string}`,
-            value,
-          });
-          const receipt = await publicClient.waitForTransactionReceipt({ hash });
-          submittedTxs.push({ stepId: step.id, itemIndex: i, hash, status: receipt.status });
-          if (receipt.status !== 'success') {
-            throw new Error(`Relay step "${step.id}" item ${i} reverted on-chain (tx=${hash})`);
+        }
+      } else {
+        // ── Solana signing path ───────────────────────────────────────────
+        const signer = await getSolanaKeypair();
+        if (!signer) throw new Error('No Solana key configured (should have been caught earlier)');
+        const conn = new Connection(SOLANA_CONFIG.rpcUrl, 'confirmed');
+
+        for (const step of quote.steps) {
+          if (!step.items || !Array.isArray(step.items)) continue;
+          for (let i = 0; i < step.items.length; i++) {
+            const item = step.items[i];
+            if (item.status === 'complete') continue;
+            const data = item.data;
+            if (!data || !Array.isArray(data.instructions)) {
+              throw new Error(`Relay step "${step.id}" item ${i} has no Solana instructions: ${JSON.stringify(item).slice(0, 300)}`);
+            }
+
+            // Convert Relay's serialized instructions into web3.js TransactionInstructions
+            const ixs: TransactionInstruction[] = data.instructions.map((ix: any) => {
+              return new TransactionInstruction({
+                programId: new PublicKey(ix.programId),
+                keys: (ix.keys as any[]).map((k) => ({
+                  pubkey: new PublicKey(k.pubkey),
+                  isSigner: !!k.isSigner,
+                  isWritable: !!k.isWritable,
+                })),
+                data: Buffer.from(ix.data, 'hex'),
+              });
+            });
+
+            // Fetch any address lookup tables referenced by the instructions
+            const altAddresses: string[] = data.addressLookupTableAddresses ?? [];
+            const alts: AddressLookupTableAccount[] = [];
+            for (const addr of altAddresses) {
+              const lut = await conn.getAddressLookupTable(new PublicKey(addr));
+              if (lut.value) alts.push(lut.value);
+            }
+
+            // Build a v0 versioned transaction, sign, submit
+            const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash('confirmed');
+            const messageV0 = new TransactionMessage({
+              payerKey: signer.publicKey,
+              recentBlockhash: blockhash,
+              instructions: ixs,
+            }).compileToV0Message(alts);
+
+            const vtx = new VersionedTransaction(messageV0);
+            vtx.sign([signer]);
+
+            const sig = await conn.sendRawTransaction(vtx.serialize(), {
+              skipPreflight: false,
+              maxRetries: 3,
+              preflightCommitment: 'confirmed',
+            });
+
+            const confirmation = await conn.confirmTransaction(
+              { signature: sig, blockhash, lastValidBlockHeight },
+              'confirmed',
+            );
+            const status = confirmation.value.err ? 'reverted' : 'success';
+            submittedTxs.push({
+              stepId: step.id,
+              itemIndex: i,
+              chain: 'solana',
+              chainId: originChainId,
+              signature: sig,
+              status,
+            });
+            if (confirmation.value.err) {
+              throw new Error(`Relay step "${step.id}" item ${i} reverted on Solana (sig=${sig}): ${JSON.stringify(confirmation.value.err)}`);
+            }
           }
         }
       }
@@ -252,8 +431,29 @@ export async function handleRelayTool(name: string, args: Record<string, unknown
       // Pull request id and fee summary from quote details for the response
       const details = quote.details ?? {};
       const fees = quote.fees ?? {};
+      const lastTx = submittedTxs[submittedTxs.length - 1];
+      let explorer: string | null = null;
+      if (lastTx) {
+        if (lastTx.chain === 'solana') {
+          explorer = `https://solscan.io/tx/${lastTx.signature}`;
+        } else if (lastTx.chainId === INK_CHAIN_ID) {
+          explorer = `https://explorer.inkonchain.com/tx/${lastTx.hash}`;
+        } else {
+          // Try to look up the chain's block explorer from viem/chains
+          try {
+            const chain = (await import('../client.js')).getChainByChainId(lastTx.chainId);
+            const explorerUrl = chain.blockExplorers?.default?.url;
+            if (explorerUrl) explorer = `${explorerUrl}/tx/${lastTx.hash}`;
+          } catch {
+            // Unknown chain, no explorer link
+          }
+        }
+      }
+
       return {
         success: true,
+        originChainId,
+        destinationChainId,
         requestId: (quote as any).request?.id ?? quote.id ?? null,
         txs: submittedTxs,
         currencyIn: details.currencyIn,
@@ -261,8 +461,9 @@ export async function handleRelayTool(name: string, args: Record<string, unknown
         rate: details.rate,
         totalImpact: details.totalImpact,
         fees,
-        explorer: submittedTxs.length > 0
-          ? `https://explorer.inkonchain.com/tx/${submittedTxs[submittedTxs.length - 1].hash}`
+        explorer,
+        statusCheck: quote.steps?.[0]?.items?.[0]?.check?.endpoint
+          ? `${RELAY_API}${quote.steps[0].items[0].check.endpoint}`
           : null,
       };
     }
