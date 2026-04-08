@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.14.4] — 2026-04-08
+
+### Fixed
+- **`relay_get_quote`, `relay_get_price`, and `relay_get_requests` no longer always default the `user` field to the EVM address regardless of `originChainId`.** All three were calling `await getAccount()` (the Ink/EVM wallet) for any request without an explicit `user`, which caused Relay's API to reject Solana-origin queries with `Invalid address 0xfe22... for chain 792703809`. The fix introduces a chain-aware `defaultUserForChain(chainId)` helper that resolves the right wallet for the requested origin VM type (Solana pubkey for SVM origins, EVM address for EVM origins). `relay_execute` already had this logic in v1.14.2 — now the read tools match.
+- **`relay_get_quote` and `relay_get_price` now also default `recipient` based on the destination chain VM type** when not explicitly provided. SVM destinations get the configured Solana pubkey, EVM destinations get the configured EVM address (same across all EVM chains). Previously cross-VM requests that omitted `recipient` would fall through to Relay's `recipient = user` default, which validates the user address against the destination chain and throws `Invalid address ... for chain ...` (in either direction depending on which VM was the origin).
+
+These were the source of the noisy `Relay API 400` errors users saw before pivoting to `relay_execute` (which already had the chain-aware logic baked in from v1.14.2). The functional path was never broken — `relay_execute` always worked — but the read-side tools surfaced misleading errors that made the wrapper look broken.
+
 ## [1.14.3] — 2026-04-08
 
 ### Changed
