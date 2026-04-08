@@ -25,6 +25,29 @@ const SVM_ORIGIN_CHAINS = new Set<number>([SOLANA_CHAIN_ID, ECLIPSE_CHAIN_ID, SO
 // Non-EVM, non-SVM origins we can't sign for at all
 const NON_EVM_SVM_CHAINS = new Set<number>([1337, 3586256, 8253038, 728126428]); // hyperliquid, lighter, bitcoin, tron
 
+/**
+ * Resolve the default `user` address for a given Relay chain ID. Used by
+ * read tools (relay_get_quote, relay_get_price, relay_get_requests) to pick
+ * the right wallet identifier based on the requested chain — without this,
+ * those tools always defaulted to the EVM address from getAccount() and
+ * Relay's API rejected Solana-origin requests with "Invalid address ... for
+ * chain 792703809".
+ */
+async function defaultUserForChain(chainId: number | undefined): Promise<string> {
+  if (chainId !== undefined && SVM_ORIGIN_CHAINS.has(chainId)) {
+    const signer = await getSolanaKeypair();
+    if (!signer) {
+      throw new Error(`Chain ${chainId} is SVM but no Solana key is configured. Pass \`user\` explicitly or set SOL_PRIVATE_KEY.`);
+    }
+    return signer.publicKey.toBase58();
+  }
+  if (chainId !== undefined && NON_EVM_SVM_CHAINS.has(chainId)) {
+    throw new Error(`Chain ${chainId} uses a non-EVM/non-SVM VM. Pass \`user\` explicitly with an address valid on that chain.`);
+  }
+  // Default: any EVM chain (or chainId omitted entirely → assume Ink)
+  return await getAccount();
+}
+
 async function relayFetch(path: string, method: 'GET' | 'POST' = 'GET', body?: unknown) {
   const url = method === 'GET' && body
     ? `${RELAY_API}${path}?${new URLSearchParams(body as Record<string, string>).toString()}`
@@ -68,7 +91,7 @@ export const relayTools = [
   },
   {
     name: 'relay_get_quote',
-    description: 'Get a quote for a cross-chain bridge or swap via Relay. Returns fees, estimated output, and executable steps.',
+    description: 'Get a quote for a cross-chain bridge or swap via Relay. Returns fees, estimated output, and executable steps. The `user` field defaults to the wallet matching the origin chain VM (Solana pubkey for SVM origins, EVM address for EVM origins). The `recipient` field defaults to the wallet matching the destination chain VM. Both can be overridden explicitly.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -170,31 +193,66 @@ export async function handleRelayTool(name: string, args: Record<string, unknown
     }
 
     case 'relay_get_quote': {
-      const user = (args.user as string) ?? await getAccount();
+      const originChainId = args.originChainId as number | undefined;
+      const destinationChainId = (args.destinationChainId as number | undefined) ?? originChainId;
+      const user = (args.user as string) ?? await defaultUserForChain(originChainId);
+
+      // Default recipient if omitted: pick the right wallet for the destination
+      // chain's VM type. SVM destination → Solana pubkey. EVM destination → EVM
+      // address. Without this, cross-chain quotes fall through to Relay's
+      // recipient=user default, which is wrong for cross-VM bridges.
+      let recipient = args.recipient as string | undefined;
+      if (!recipient && destinationChainId !== undefined) {
+        if (SVM_ORIGIN_CHAINS.has(destinationChainId)) {
+          const signer = await getSolanaKeypair();
+          if (signer) recipient = signer.publicKey.toBase58();
+        } else if (!NON_EVM_SVM_CHAINS.has(destinationChainId)) {
+          try { recipient = await getAccount(); } catch { /* no EVM key */ }
+        }
+      }
+
       const body: Record<string, unknown> = {
         user,
-        originChainId: args.originChainId,
-        destinationChainId: args.destinationChainId,
+        originChainId,
+        destinationChainId,
         originCurrency: args.originCurrency,
         destinationCurrency: args.destinationCurrency,
         amount: args.amount,
         tradeType: (args.tradeType as string) ?? 'EXACT_INPUT',
       };
-      if (args.recipient) body.recipient = args.recipient;
+      if (recipient) body.recipient = recipient;
       return relayFetch('/quote', 'POST', body);
     }
 
     case 'relay_get_price': {
-      const user = (args.user as string) ?? await getAccount();
+      const originChainId = args.originChainId as number | undefined;
+      const destinationChainId = args.destinationChainId as number | undefined;
+      const user = (args.user as string) ?? await defaultUserForChain(originChainId);
+
+      // /price needs an explicit recipient when origin and destination have
+      // different VM types — otherwise Relay defaults recipient=user and
+      // validates the user address against the destination chain, throwing
+      // "Invalid address ... for chain ...".
+      let recipient: string | undefined;
+      if (destinationChainId !== undefined) {
+        if (SVM_ORIGIN_CHAINS.has(destinationChainId)) {
+          const signer = await getSolanaKeypair();
+          if (signer) recipient = signer.publicKey.toBase58();
+        } else if (!NON_EVM_SVM_CHAINS.has(destinationChainId)) {
+          try { recipient = await getAccount(); } catch { /* no EVM key */ }
+        }
+      }
+
       const body: Record<string, unknown> = {
         user,
-        originChainId: args.originChainId,
-        destinationChainId: args.destinationChainId,
+        originChainId,
+        destinationChainId,
         originCurrency: args.originCurrency,
         destinationCurrency: args.destinationCurrency,
         amount: args.amount,
         tradeType: (args.tradeType as string) ?? 'EXACT_INPUT',
       };
+      if (recipient) body.recipient = recipient;
       return relayFetch('/price', 'POST', body);
     }
 
@@ -208,9 +266,17 @@ export async function handleRelayTool(name: string, args: Record<string, unknown
       const params: Record<string, string> = {};
       if (args.hash) params.hash = args.hash as string;
       if (args.id) params.id = args.id as string;
-      if (args.user) params.user = args.user as string;
-      else {
-        try { params.user = await getAccount(); } catch { /* no wallet */ }
+      if (args.user) {
+        params.user = args.user as string;
+      } else {
+        // Default user is chain-aware: if originChainId hints at Solana, use the
+        // SOL pubkey; otherwise default to the EVM address.
+        const hintChainId = (args.originChainId as number | undefined) ?? (args.destinationChainId as number | undefined);
+        try {
+          params.user = await defaultUserForChain(hintChainId);
+        } catch {
+          /* no wallet for this chain — let Relay return all of them or 400 */
+        }
       }
       if (args.originChainId) params.originChainId = String(args.originChainId);
       if (args.destinationChainId) params.destinationChainId = String(args.destinationChainId);
