@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.14.3] — 2026-04-08
+
+### Changed
+- **`solana_token_balance` now supports native SOL** in addition to SPL tokens. Pass `So11111111111111111111111111111111111111112` (canonical Wrapped SOL identifier used by Jupiter/Orca) or `11111111111111111111111111111111` (System Program, used by Relay) as the `mint` to query the wallet's native lamport balance via `connection.getBalance()`. Mirrors the EVM convention where `erc20_balance` accepts the zero address for native ETH. Returns `{ amount, decimals: 9, uiAmount, symbol: "SOL", isNative: true }` for the native path. Closes the gap where users had to ask "what's my SOL balance" and the agent had no native tool to call.
+
+### Fixed
+- **`solana_token_balance` clean error when `mint` is missing.** Previously the handler called `new PublicKey(undefined)` and surfaced the cryptic `Cannot read properties of undefined (reading '_bn')` error from `@solana/web3.js`. Now throws a clear message explaining that `mint` is required and listing both the SPL and native SOL formats.
+- Same defensive validation added for invalid `owner` pubkeys (clean error instead of `_bn` undefined).
+
 ## [1.14.2] — 2026-04-08
 
 ### Changed
