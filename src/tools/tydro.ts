@@ -54,15 +54,50 @@ function parseAmount(amount: string | number, decimals: number): bigint {
 
 async function ensureAllowance(asset: Address, spender: Address, amount: bigint, owner: Address) {
   if (amount === maxUint256) return;
-  const allowance = await publicClient.readContract({
+
+  // Initial allowance check
+  const initial = await publicClient.readContract({
     address: asset, abi: TYDRO_ERC20_ABI, functionName: 'allowance', args: [owner, spender],
-  });
-  if ((allowance as bigint) >= amount) return;
+  }) as bigint;
+  if (initial >= amount) return;
+
+  // Send max approve
   const wc = await getWalletClient();
   const hash = await wc.writeContract({
     address: asset, abi: TYDRO_ERC20_ABI, functionName: 'approve', args: [spender, maxUint256],
   });
-  await publicClient.waitForTransactionReceipt({ hash });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+
+  // Reject silent failures: viem's waitForTransactionReceipt does NOT throw on
+  // reverted txs. Some tokens (USDT-style legacy approve, regulated tokens with
+  // allowlists, paused tokens) revert on approve(). Without this check, the
+  // tool would silently proceed to supply/borrow/repay and surface a confusing
+  // InsufficientAllowance() error from the Pool instead.
+  if (receipt.status !== 'success') {
+    throw new Error(
+      `Approval reverted on-chain (asset=${asset} spender=${spender} tx=${hash}). ` +
+      `The token contract rejected the approve() call. Some tokens require special handling ` +
+      `(USDT-style legacy approve sequences, regulated stables with allowlists). Aborting.`
+    );
+  }
+
+  // Belt-and-braces: re-read allowance and verify it covers the requested
+  // amount. Defends against eventually-consistent RPCs serving stale state
+  // immediately after a confirmed approve, AND tokens that return false from
+  // approve() without reverting.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const post = await publicClient.readContract({
+      address: asset, abi: TYDRO_ERC20_ABI, functionName: 'allowance', args: [owner, spender],
+    }) as bigint;
+    if (post >= amount) return;
+    await new Promise(r => setTimeout(r, 600));
+  }
+
+  throw new Error(
+    `Approval transaction confirmed (tx=${hash}) but allowance still reads as insufficient ` +
+    `after polling (needed >= ${amount}). The RPC node may be lagging — retry in a few seconds. ` +
+    `If retries continue to fail, the token may return false from approve() without reverting.`
+  );
 }
 
 export const tydroTools = [
@@ -97,12 +132,12 @@ export const tydroTools = [
   },
   {
     name: 'tydro_supply',
-    description: 'Supply (deposit) an asset to Tydro to earn interest. Auto-approves if needed. Requires EVM_PRIVATE_KEY.',
+    description: 'Supply (deposit) an asset to Tydro to earn interest. Auto-approves if needed (verifies the approve receipt status and re-reads allowance to defend against eventually-consistent RPCs). Use "max" as the amount to supply the wallet\'s entire on-chain balance of the asset — useful when the prior step (e.g. a swap) had slippage and the exact balance is uncertain. Requires EVM_PRIVATE_KEY.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         asset: { type: 'string', description: 'Asset symbol or address' },
-        amount: { type: 'string', description: 'Amount to supply (e.g. "1.5")' },
+        amount: { type: 'string', description: 'Amount to supply (e.g. "1.5"), or "max" for the wallet\'s full balance' },
       },
       required: ['asset', 'amount'],
     },
@@ -208,15 +243,37 @@ export async function handleTydroTool(name: string, args: Record<string, unknown
 
     case 'tydro_supply': {
       const { address: assetAddr, decimals } = resolveAsset(args.asset as string);
-      const amount = parseAmount(args.amount as string, decimals);
       const owner = await getAccount();
+
+      // "max" resolves to the wallet's current on-chain balance of the asset.
+      // Avoids the common footgun of supplying a stale/quoted amount that's
+      // slightly more than the actual balance after swap slippage etc.
+      let amount: bigint;
+      let amountLabel: string;
+      if (args.amount === 'max') {
+        const bal = await publicClient.readContract({
+          address: assetAddr, abi: TYDRO_ERC20_ABI, functionName: 'balanceOf', args: [owner],
+        }) as bigint;
+        if (bal === 0n) {
+          throw new Error(`Cannot supply "max": wallet has 0 ${args.asset}.`);
+        }
+        amount = bal;
+        amountLabel = `${(Number(bal) / Math.pow(10, decimals))} (max balance)`;
+      } else {
+        amount = parseAmount(args.amount as string, decimals);
+        amountLabel = String(args.amount);
+      }
+
       await ensureAllowance(assetAddr, TYDRO_POOL, amount, owner);
       const wc = await getWalletClient();
       const hash = await wc.writeContract({
         address: TYDRO_POOL, abi: TYDRO_POOL_ABI, functionName: 'supply', args: [assetAddr, amount, owner, 0],
       });
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
-      return { hash, status: receipt.status, asset: args.asset, amount: args.amount };
+      if (receipt.status !== 'success') {
+        throw new Error(`tydro_supply reverted on-chain (tx=${hash}). The approve was successful but the supply call itself failed — check the asset's pool config (active, supply cap, etc.).`);
+      }
+      return { hash, status: receipt.status, asset: args.asset, amount: amountLabel };
     }
 
     case 'tydro_borrow': {

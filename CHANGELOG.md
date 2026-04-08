@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.14.5] — 2026-04-08
+
+### Fixed
+- **`tydro_supply` (and any other Tydro write that calls `ensureAllowance`) could silently fail when the approve transaction reverted on-chain.** Same bug pattern that was fixed in `tsunami.ts` for v1.14.1 — `viem`'s `waitForTransactionReceipt` returns receipts for reverted transactions without throwing, so a silently-failed approve let the downstream supply/borrow/repay run with allowance still at zero, surfacing a confusing `InsufficientAllowance()` from the Pool. The Tydro version of `ensureAllowance` now (a) verifies `receipt.status === 'success'` after the approve and throws clearly on revert, and (b) re-reads the allowance with retry/backoff after confirmation to defend against eventually-consistent RPC providers serving stale state immediately after a confirmed write.
+- **`tydro_supply` now also checks `receipt.status` on the supply call itself** and throws a clear error instead of silently returning a reverted receipt.
+
+### Added
+- **`tydro_supply` accepts `"max"` as the amount**, mirroring the existing `"max"` support in `tydro_withdraw` and `tydro_repay`. Resolves to the wallet's current on-chain balance of the asset via `balanceOf`. Useful when the prior step (e.g. a Relay swap) had slippage and the exact balance is uncertain — passing a stale "expected" amount would otherwise revert with `InsufficientAllowance()` (Aave's allowance check fires before its balance check, so an over-supply looks like an allowance issue even when the allowance is fine). The `tydro_supply max` form sidesteps the entire class of "I quoted X but the swap actually delivered X minus slippage" footguns.
+
 ## [1.14.4] — 2026-04-08
 
 ### Fixed
