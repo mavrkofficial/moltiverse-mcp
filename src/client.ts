@@ -3,11 +3,106 @@ import {
   createWalletClient,
   http,
   type Address,
+  type Chain,
   type Hash,
+  type PublicClient,
+  type WalletClient,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import * as viemChains from 'viem/chains';
 import { ink } from './config.js';
 import { getPrivateKey } from './keychain.js';
+
+// ── Multi-chain helpers (for cross-chain relay_execute) ────────────────
+//
+// These helpers create viem clients for ARBITRARY EVM chains using the same
+// private key loaded from env/keychain. Useful when an MCP tool needs to sign
+// an origin tx on a chain other than Ink (e.g. Relay cross-chain bridges from
+// Base, Arbitrum, Ethereum mainnet, etc.). The same keypair derives to the
+// same address on every EVM chain, so the wallet is effectively multi-chain.
+//
+// Chain definitions come from viem/chains (300+ EVM chains shipped out of
+// the box). RPC URLs fall back to the chain's default but can be overridden
+// per-chain via EVM_RPC_OVERRIDES env var (JSON map from chainId -> rpc URL):
+//   EVM_RPC_OVERRIDES='{"8453":"https://mainnet.base.org","42161":"https://..."}'
+
+const chainsByChainId = new Map<number, Chain>();
+for (const chain of Object.values(viemChains)) {
+  if (chain && typeof chain === 'object' && 'id' in chain && typeof (chain as { id: unknown }).id === 'number') {
+    chainsByChainId.set((chain as Chain).id, chain as Chain);
+  }
+}
+
+function getChainRpcOverride(chainId: number): string | undefined {
+  const raw = process.env.EVM_RPC_OVERRIDES;
+  if (!raw) return undefined;
+  try {
+    const map = JSON.parse(raw) as Record<string, string>;
+    return map[String(chainId)];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Look up a viem Chain definition by chain ID. Covers the 300+ chains
+ * shipped in viem/chains. Throws if the chain ID is unknown.
+ */
+export function getChainByChainId(chainId: number): Chain {
+  const chain = chainsByChainId.get(chainId);
+  if (!chain) {
+    throw new Error(
+      `No viem chain definition found for chainId ${chainId}. ` +
+      `Only chains included in viem/chains can be used as cross-chain origins. ` +
+      `If you need this chain, open an issue on the moltiverse-mcp repo.`,
+    );
+  }
+  return chain;
+}
+
+/**
+ * Get a read-only public client for any EVM chain. Uses the chain's default
+ * RPC unless overridden via EVM_RPC_OVERRIDES env var.
+ */
+export function getPublicClientForChain(chainId: number): PublicClient {
+  if (chainId === 57073) return publicClient as PublicClient; // reuse the default Ink client
+  const chain = getChainByChainId(chainId);
+  const rpc = getChainRpcOverride(chainId);
+  return createPublicClient({ chain, transport: http(rpc) });
+}
+
+/**
+ * Get a wallet client for any EVM chain, signed by the locally-held EVM
+ * private key (env or OS keychain). The same key signs for every EVM chain
+ * because addresses are derived deterministically from the private key.
+ */
+export async function getWalletClientForChain(chainId: number): Promise<WalletClient> {
+  const pk = await getPrivateKey();
+  if (!pk) throw new Error('No EVM private key found. Run: npx moltiverse-mcp-setup');
+  const chain = getChainByChainId(chainId);
+  const rpc = getChainRpcOverride(chainId);
+  const account = privateKeyToAccount(pk as `0x${string}`);
+  return createWalletClient({ account, chain, transport: http(rpc) });
+}
+
+/**
+ * Send a transaction on a specific EVM chain. Broadcasts via that chain's
+ * RPC instead of the default Ink RPC used by the static sendTx() helper.
+ */
+export async function sendTxOnChain(
+  chainId: number,
+  params: { to: Address; data: `0x${string}`; value?: bigint },
+): Promise<{ hash: Hash }> {
+  const wc = await getWalletClientForChain(chainId);
+  const hash = await wc.sendTransaction({
+    to: params.to,
+    data: params.data,
+    value: params.value ?? 0n,
+    account: wc.account!,
+    chain: wc.chain!,
+  });
+  return { hash };
+}
 
 // ── Public Client (always available) ──────────────────────────────────
 export const publicClient = createPublicClient({

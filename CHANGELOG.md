@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.14.2] — 2026-04-08
+
+### Changed
+- **`relay_execute` now supports any EVM chain or Solana mainnet as origin**, dramatically expanding the cross-chain surface area. Previous version was Ink-only.
+
+  Supported origins (any chain the configured wallet can sign for):
+  - **Any of the 60+ EVM chains** in `viem/chains` — Ink, Base, Arbitrum, Optimism, Ethereum mainnet, Polygon, BNB, Avalanche, Linea, Scroll, zkSync, Blast, Berachain, Mantle, etc. The same locally-held EVM private key signs for every chain because addresses are derived deterministically from the keypair (your Ink address IS your Base address IS your Arbitrum address).
+  - **Solana mainnet** (`792703809`) via the configured Solana keypair.
+
+  Supported destinations: any of the 70+ chains Relay supports.
+
+  Useful flows now possible end-to-end through the MCP:
+  - `SOL → ETH on Ink` (cross-VM bridge in)
+  - `SOL → USDC on Ethereum mainnet` (Solana to EVM L1)
+  - `Ink ETH → Base ETH` (EVM L2 to L2 without ever touching mainnet)
+  - `Arbitrum USDC → Ink USDT0` (cross-L2 stable rebalance)
+  - Same-chain swaps on any supported chain when local DEX liquidity is thin
+
+  New optional arguments: `originChainId` (default `57073` = Ink) and `destinationChainId` (defaults to same as origin for single-chain swaps).
+
+  Per-chain RPC URLs default to viem's baked-in defaults but can be overridden via the new `EVM_RPC_OVERRIDES` env var (JSON map from chainId to RPC URL):
+  ```
+  EVM_RPC_OVERRIDES='{"8453":"https://base-mainnet.infura.io/v3/...","42161":"https://arb1.arbitrum.io/rpc"}'
+  ```
+
+  Cross-chain bridges originating from non-EVM/non-Solana VMs (Bitcoin, Tron, Hyperliquid, Lighter) and from SVM chains other than Solana mainnet (Eclipse, SOON) are still unsupported — use `relay_get_quote` and submit the origin tx externally for those.
+
+  Implementation details:
+  - **EVM origin path**: each Relay step item carries its own `chainId`. The handler dynamically creates a `WalletClient` and `PublicClient` per step using new `getWalletClientForChain(chainId)` / `sendTxOnChain(chainId, ...)` helpers in `client.ts`, which look up the chain definition from `viem/chains` and broadcast via that chain's RPC. PublicClient instances are cached per chain ID within a single execution to avoid recreating them for each item.
+  - **Solana origin path**: Relay returns raw instructions + address-lookup-table addresses in `quote.steps[].items[].data` rather than a prebuilt transaction. The handler converts those into `TransactionInstruction` objects, fetches the referenced ALTs from chain, compiles a v0 `VersionedTransaction`, signs with `getSolanaKeypair()`, and submits via the Helius `Connection`.
+  - **Default recipient picker**: SVM destinations get the configured Solana pubkey, EVM destinations get the configured EVM address (same across all EVM chains). Non-EVM/non-SVM destinations require explicit `recipient`.
+  - Response shape now includes a `chain` field (`'evm'` | `'solana'`) and `chainId` on each submitted tx, plus an `explorer` link that picks the right block explorer based on the destination chain (Inkscan for Ink, Solscan for Solana, the chain's default explorer from `viem/chains` for everything else), and a `statusCheck` URL for polling the Relay intent status endpoint.
+
+### Added
+- New helpers in `src/client.ts`: `getChainByChainId(chainId)`, `getPublicClientForChain(chainId)`, `getWalletClientForChain(chainId)`, `sendTxOnChain(chainId, params)`. All other modules (Tydro, Tsunami, NADO, Sentry, etc.) continue to use the existing static Ink-only clients — only `relay_execute` opted into the dynamic multi-chain path.
+- New env var: `EVM_RPC_OVERRIDES` (JSON map). Optional. Override the default RPC URL for any EVM chain. Useful when you have private RPCs for chains other than Ink.
+
 ## [1.14.1] — 2026-04-07
 
 ### Fixed
